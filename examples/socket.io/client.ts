@@ -51,8 +51,7 @@ socket.on("connect", () => {
 	console.log("Connected to server!");
 
 	// 1. Subscribe to a data stream
-	client.subscribe(["system:alerts"]);
-
+	// Waycast automatically dispatches the underlying subscribe RPC for you!
 	client.onData("system:alerts", undefined, (msg) => {
 		console.log(`[Alert] ${msg}`);
 	});

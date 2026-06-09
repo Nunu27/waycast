@@ -157,10 +157,9 @@ socket.on("data", (msg) => client.handleData(msg));
 socket.on("reply", (msg) => client.handleReply(msg));
 
 socket.on("connect", () => {
-  // 3. Subscribe to Data Streams
-  client.subscribe(["system:alerts"]);
-  
-  // Listens dynamically based on the topic string rather than tracking raw JSON blobs!
+  // 3. Automatically Subscribe to Data Streams
+  // Listens dynamically based on the topic string rather than tracking raw JSON blobs.
+  // Waycast intelligently fires _waycast:subscribe on your behalf!
   client.onData("system:alerts", undefined, (msg) => {
     console.log(`Alert: ${msg}`); // Strongly typed to string
   });

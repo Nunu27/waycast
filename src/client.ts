@@ -69,6 +69,23 @@ export class ClientApp<
 		} as any);
 	}
 
+	resubscribe() {
+		const activeTopics = Array.from(this.dataListeners.keys());
+		if (activeTopics.length > 0) {
+			this.subscribe(activeTopics);
+		}
+	}
+
+	clear() {
+		const activeTopics = Array.from(this.dataListeners.keys());
+		if (activeTopics.length > 0) {
+			this.unsubscribe(activeTopics);
+		}
+		this.dataListeners.clear();
+		this.dataRouteRefCounts.clear();
+		this.rpcCallbacks.clear();
+	}
+
 	onData<Name extends Extract<keyof DataRoutes, string>>(
 		name: Name,
 		params: ParamsOf<Name>,
@@ -81,6 +98,9 @@ export class ClientApp<
 		this.dataListeners.get(topic)?.add(callback);
 
 		const refCount = this.dataRouteRefCounts.get(topic) || 0;
+		if (refCount === 0) {
+			this.subscribe([topic]);
+		}
 		this.dataRouteRefCounts.set(topic, refCount + 1);
 
 		return () => {
@@ -93,7 +113,12 @@ export class ClientApp<
 			}
 
 			const newCount = (this.dataRouteRefCounts.get(topic) || 1) - 1;
-			this.dataRouteRefCounts.set(topic, newCount);
+			if (newCount <= 0) {
+				this.unsubscribe([topic]);
+				this.dataRouteRefCounts.delete(topic);
+			} else {
+				this.dataRouteRefCounts.set(topic, newCount);
+			}
 		};
 	}
 
