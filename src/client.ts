@@ -37,11 +37,11 @@ export class ClientApp<
 		let assignedReplyTopic: string | undefined;
 
 		const res = this.adapters.send({ name, params, payload } as any);
-		Promise.resolve(res).then((replyTopic) => {
+		Promise.resolve(res).then((requestId) => {
 			if (!active) return;
-			if (replyTopic) {
-				assignedReplyTopic = replyTopic;
-				this.rpcCallbacks.set(replyTopic, callbacks as any);
+			if (requestId) {
+				assignedReplyTopic = buildReplyTopic(name, requestId);
+				this.rpcCallbacks.set(assignedReplyTopic, callbacks as any);
 			}
 		});
 
@@ -58,7 +58,7 @@ export class ClientApp<
 			name: "_waycast:subscribe",
 			params: undefined,
 			payload: { topics },
-		} as any);
+		});
 	}
 
 	unsubscribe(topics: string[]) {
@@ -66,7 +66,7 @@ export class ClientApp<
 			name: "_waycast:unsubscribe",
 			params: undefined,
 			payload: { topics },
-		} as any);
+		});
 	}
 
 	resubscribe() {
@@ -91,7 +91,7 @@ export class ClientApp<
 		params: ParamsOf<Name>,
 		callback: (data: Static<DataRoutes[Name]>) => void,
 	): () => void {
-		const topic = buildDataTopic(name, params as any);
+		const topic = buildDataTopic(name, params);
 		if (!this.dataListeners.has(topic)) {
 			this.dataListeners.set(topic, new Set());
 		}
@@ -137,10 +137,7 @@ export class ClientApp<
 		const replyTopic = buildReplyTopic(name, requestId);
 		const callbacks = this.rpcCallbacks.get(replyTopic);
 		if (callbacks) {
-			const cb = (callbacks as any)[reply.type];
-			if (cb) {
-				cb(reply.data);
-			}
+			callbacks[reply.type]?.(reply.data);
 
 			if (reply.type === "response" || reply.type === "error") {
 				this.rpcCallbacks.delete(replyTopic);
