@@ -1,0 +1,36 @@
+{
+	"name": "waycast",
+	"workspaces": [
+		"examples/*"
+	],
+	"version": "1.0.0",
+	"main": "dist/index.js",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"type": "module",
+	"devDependencies": {
+		"@biomejs/biome": "2.4.16",
+		"@types/bun": "latest",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.0.7"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"typebox": "^1.2.4"
+	},
+	"scripts": {
+		"prepare": "husky",
+		"build": "bun build ./src/index.ts --outfile ./dist/index.js --target node && tsc -p tsconfig.build.json"
+	}
+}

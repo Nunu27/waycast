@@ -1,0 +1,17 @@
+{
+	"name": "socket.io",
+	"module": "index.ts",
+	"type": "module",
+	"private": true,
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"socket.io": "^4.8.3",
+		"socket.io-client": "^4.8.3",
+		"typebox": "^1.2.5"
+	}
+}
