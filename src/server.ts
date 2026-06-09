@@ -55,7 +55,7 @@ export class ServerApp<
 	private compiledPayloads = new Map<string, any>();
 
 	constructor(
-		private router: Router<Context, Meta, DataRoutes, RpcRoutes>,
+		private router: Router<Meta, DataRoutes, RpcRoutes>,
 		private adapters: ServerAdapters<DataRoutes, RpcRoutes & any>,
 	) {
 		for (const [name, route] of Object.entries(this.router._rpcRoutes)) {

@@ -23,7 +23,7 @@ export class ClientApp<
 	private dataRouteRefCounts = new Map<string, number>();
 
 	constructor(
-		_router: Router<any, any, DataRoutes, RpcRoutes>,
+		_router: Router<any, DataRoutes, RpcRoutes>,
 		private adapters: ClientAdapters<RpcRoutes & any>,
 	) {}
 

@@ -33,7 +33,7 @@ import { Router } from "waycast";
 export interface Context { userId?: string; }
 export interface Meta { requireAuth?: boolean; }
 
-export const appRouter = new Router<Context, Meta>()
+export const appRouter = new Router<Meta>()
   // Define a Data Stream (Pub/Sub)
   .data("system:alerts", t.String())
   
@@ -63,12 +63,13 @@ export type AppRouter = typeof appRouter;
 
 Waycast requires you to adapt its input/output to your chosen network layer. Here is an example using `socket.io`.
 
+**Step 1: Setup strict Typing for Socket.io**
+Extract your router types to strictly type the underlying generic `Server`.
 ```typescript
 import { Server } from "socket.io";
-import { appRouter, type AppRouter } from "./router";
+import { appRouter, type AppRouter, type Context } from "./router";
 import type { RequestMessage, DataMessage, RpcReplyMessage, InferDataRoutes, InferRpcRoutes, BuiltInRpcRoutes } from "waycast";
 
-// 1. Setup strict Typing for Socket.io
 type MyDataRoutes = InferDataRoutes<AppRouter>;
 type MyRpcRoutes = InferRpcRoutes<AppRouter> & BuiltInRpcRoutes;
 
@@ -78,9 +79,12 @@ const io = new Server<{
   data: (message: DataMessage<MyDataRoutes>) => void;
   reply: (message: RpcReplyMessage<MyRpcRoutes>) => void;
 }>(3000);
+```
 
-// 2. Build the Waycast Server Adapter
-const server = appRouter.buildServer({
+**Step 2: Build the Waycast Server Adapter**
+Tell Waycast how to transmit and subscribe to your specific network transport layer.
+```typescript
+const server = appRouter.buildServer<Context>({
   topic: {
     subscribe: (connId, ...topics) => io.sockets.sockets.get(connId)?.join(topics),
     unsubscribe: (connId, ...topics) => topics.forEach(t => io.sockets.sockets.get(connId)?.leave(t))
@@ -88,46 +92,42 @@ const server = appRouter.buildServer({
   emit: (topic, message) => io.to(topic).emit("data", message),
   reply: (topic, message) => io.to(topic).emit("reply", message)
 });
+```
 
-// 3. Register RPC Handlers
+**Step 3: Register RPC Handlers**
+Implement your business logic. Payloads are automatically validated before they hit your handler!
+```typescript
 server.on("job:[jobId]:process", async (ctx) => {
   const { jobId } = ctx.params; // Fully Typed! { jobId: string }
   const { force } = ctx.payload; // Fully Typed! { force: boolean }
 
-  // Send progressive intermediate replies
+  // Send progressive intermediate replies during the RPC!
   ctx.reply("log", `Starting job ${jobId}`);
   ctx.reply("progress", { percent: 50 });
 
   return true; // Final response automatically sent
 })
-.on("metrics:ping", async (ctx) => {
-  // Fire-and-forget: No response is sent over the network
-  return undefined; 
-})
 .onDispose("job:[jobId]:process", (requestId) => {
   console.log(`Clean up request ${requestId} resources!`);
 });
+```
 
-// Optional: Disconnected/Manual Replies outside the handler!
-// server.reply("job:[jobId]:process", "req-123", "progress", { percent: 100 });
-// server.replyResponse("job:[jobId]:process", "req-123", true);
-
-// 4. Clean up lingering RPCs when sockets leave rooms (or disconnect)
+**Step 4: Hook up the Socket**
+Listen to the socket and pass the raw payload into Waycast. Waycast handles the validation and routing!
+```typescript
+// Clean up lingering RPCs when sockets leave rooms (or disconnect)
 io.of("/").adapter.on("leave-room", (room, id) => {
-  // Waycast intelligently delimits with | to avoid namespace collisions
   if (room.endsWith("|reply")) server.handleDispose(room);
 });
 
-// 5. Hook up the Socket
 io.on("connection", (socket) => {
   socket.on("rpc", (message, ack) => {
-    const requestId = Math.random().toString(36).slice(2); // Server generates ID
-    if (ack) ack(requestId); // Send ACK back to client
+    const requestId = Math.random().toString(36).slice(2);
+    if (ack) ack(requestId); 
 
     // Pass the message into Waycast
     server.handle(socket.id, requestId, message, async (meta) => {
-      // Incoming payload is instantly validated against your TypeBox schema!
-      return { userId: "user-123" }; // Injects context
+      return { userId: "user-123" }; // Injects Context into the handler!
     });
   });
 });
@@ -135,13 +135,15 @@ io.on("connection", (socket) => {
 
 ### 3. Setup the Client
 
+**Step 1: Build the Waycast Client Adapter**
+Map your socket's `emit` to Waycast's `send` function.
+
 ```typescript
 import { io, Socket } from "socket.io-client";
 import { appRouter, type AppRouter } from "./router";
 
 const socket = io("http://localhost:3000");
 
-// 1. Build the Waycast Client Adapter
 const client = appRouter.buildClient({
   send: (message) => {
     return new Promise((resolve) => {
@@ -151,20 +153,26 @@ const client = appRouter.buildClient({
     });
   }
 });
+```
 
-// 2. Hook up incoming Socket messages
+**Step 2: Hook up Socket Listeners**
+Pipe raw incoming messages into Waycast for decoding and typing.
+```typescript
 socket.on("data", (msg) => client.handleData(msg));
 socket.on("reply", (msg) => client.handleReply(msg));
+```
 
+**Step 3: Call RPCs & Subscribe**
+Enjoy end-to-end type safety across the network!
+```typescript
 socket.on("connect", () => {
-  // 3. Automatically Subscribe to Data Streams
+  // Automatically Subscribe to Data Streams
   // Listens dynamically based on the topic string rather than tracking raw JSON blobs.
-  // Waycast intelligently fires _waycast:subscribe on your behalf!
   client.onData("system:alerts", undefined, (msg) => {
     console.log(`Alert: ${msg}`); // Strongly typed to string
   });
 
-  // 4. Call an RPC
+  // Call an RPC
   client.rpc("job:[jobId]:process", { jobId: "backup" }, { force: true }, {
     log: (msg) => console.log(msg),
     progress: (p) => console.log(`${p.percent}%`),
@@ -172,6 +180,51 @@ socket.on("connect", () => {
     error: (err) => console.error(err)
   });
 });
+```
+
+## Router Composition & Merging
+
+Waycast cleanly separates your **Schemas** (`Router`) from your **Implementation** (`ServerApp`). This allows you to split large applications into domain-driven modules seamlessly while preserving 100% type inference.
+
+To split schemas, use the `.merge()` method:
+
+```typescript
+// users.ts
+export const userRouter = new Router<Meta>()
+  .data("user:status", t.String())
+  .rpc("user:create", { /* ... */ });
+
+// posts.ts
+export const postRouter = new Router<Meta>()
+  .rpc("post:like", { /* ... */ });
+
+// index.ts
+export const appRouter = new Router<Meta>()
+  .merge(userRouter)
+  .merge(postRouter);
+
+export type AppRouter = typeof appRouter;
+```
+
+To split your implementations, simply define your `Server` type once and pass it to your controller modules:
+
+```typescript
+// router.ts
+export type AppServer = ReturnType<typeof appRouter.buildServer<Context>>;
+
+// controllers/user.ts
+import type { AppServer } from "../router";
+
+export function registerUserHandlers(server: AppServer) {
+  // Autocomplete instantly knows about "user:create" and its payload!
+  server.on("user:create", async (ctx) => {
+    console.log("Creating user...", ctx.payload);
+  });
+}
+
+// server.ts
+const server = appRouter.buildServer<Context>(adapters);
+registerUserHandlers(server);
 ```
 
 ## Utility Types (Custom Hooks)
@@ -198,7 +251,7 @@ export function useWaycastData<T extends Extract<keyof DataRoutes, string>>(
     return client.onData(topic, params, (newData) => {
       setData(newData);
     });
-  }, [topic, JSON.stringify(params)]);
+  }, [topic, params]); // Ensure `params` is memoized or stable to avoid re-subscriptions
 
   return data;
 }

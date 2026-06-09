@@ -7,7 +7,7 @@ import type {
 	RequestMessage,
 	RpcReplyMessage,
 } from "../../src";
-import { type AppRouter, appRouter } from "./router";
+import { type AppRouter, appRouter, type Context } from "./router";
 
 type MyDataRoutes = InferDataRoutes<AppRouter>;
 type MyRpcRoutes = InferRpcRoutes<AppRouter> & BuiltInRpcRoutes;
@@ -26,7 +26,7 @@ interface ServerToClientEvents {
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(3000);
 
-const server = appRouter.buildServer({
+const server = appRouter.buildServer<Context>({
 	topic: {
 		subscribe: (connectionId, ...topics) => {
 			const socket = io.sockets.sockets.get(connectionId);

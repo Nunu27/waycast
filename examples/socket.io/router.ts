@@ -9,7 +9,7 @@ export interface Meta {
 	requireAuth?: boolean;
 }
 
-export const appRouter = new Router<Context, Meta>()
+export const appRouter = new Router<Meta>()
 	.data("system:alerts", t.String())
 	.rpc("job:[jobId]:process", {
 		payload: t.Object({ force: t.Boolean() }),

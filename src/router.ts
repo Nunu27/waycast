@@ -20,7 +20,6 @@ export type BuiltInRpcRoutes = {
 };
 
 export class Router<
-	Context,
 	Meta,
 	DataRoutes extends Record<string, TSchema> = {},
 	RpcRoutes extends Record<string, RpcDef<any, any, any, Meta>> = {},
@@ -44,7 +43,7 @@ export class Router<
 	data<Name extends string, Schema extends TSchema>(
 		name: Name,
 		schema: Schema,
-	): Router<Context, Meta, DataRoutes & { [K in Name]: Schema }, RpcRoutes> {
+	): Router<Meta, DataRoutes & { [K in Name]: Schema }, RpcRoutes> {
 		this._dataRoutes[name] = schema;
 		return this as any;
 	}
@@ -58,7 +57,6 @@ export class Router<
 		name: Name,
 		def: { payload: Payload; replies: Replies; response: Response; meta: Meta },
 	): Router<
-		Context,
 		Meta,
 		DataRoutes,
 		RpcRoutes & { [K in Name]: RpcDef<Payload, Replies, Response, Meta> }
@@ -67,27 +65,37 @@ export class Router<
 		return this as any;
 	}
 
+	merge<
+		OtherData extends Record<string, TSchema>,
+		OtherRpc extends Record<string, RpcDef<any, any, any, Meta>>,
+	>(
+		other: Router<Meta, OtherData, OtherRpc>,
+	): Router<Meta, DataRoutes & OtherData, RpcRoutes & OtherRpc> {
+		this._dataRoutes = { ...this._dataRoutes, ...other._dataRoutes };
+		this._rpcRoutes = { ...this._rpcRoutes, ...other._rpcRoutes };
+		return this as any;
+	}
+
 	_getRpcRoute(name: string): any {
 		return this._rpcRoutes[name];
 	}
 
-	buildServer(
+	buildServer<Context = {}>(
 		adapters: ServerAdapters<DataRoutes, RpcRoutes & BuiltInRpcRoutes>,
 	): ServerApp<Context, Meta, DataRoutes, RpcRoutes> {
-		return new ServerApp(this, adapters);
+		return new ServerApp(this as any, adapters);
 	}
 
 	buildClient(
 		adapters: ClientAdapters<RpcRoutes & BuiltInRpcRoutes>,
 	): ClientApp<DataRoutes, RpcRoutes> {
-		return new ClientApp(this, adapters);
+		return new ClientApp(this as any, adapters);
 	}
 }
 
 export type InferDataRoutes<T> =
-	T extends Router<any, any, infer D, any> ? D : never;
-export type InferRpcRoutes<T> =
-	T extends Router<any, any, any, infer R> ? R : never;
+	T extends Router<any, infer D, any> ? D : never;
+export type InferRpcRoutes<T> = T extends Router<any, any, infer R> ? R : never;
 
 export const buildDataTopic = (
 	name: string,
