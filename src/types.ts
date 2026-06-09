@@ -26,36 +26,36 @@ export interface RpcDef<
 }
 
 export type DataMessage<DataRoutes extends Record<string, TSchema>> = {
-		[K in keyof DataRoutes & string]: {
-			name: K;
-			topic: string;
-			data: Static<DataRoutes[K]>;
-		};
-	}[keyof DataRoutes & string];
+	[K in keyof DataRoutes & string]: {
+		name: K;
+		topic: string;
+		data: Static<DataRoutes[K]>;
+	};
+}[keyof DataRoutes & string];
 
 export type RpcReplyMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
-		[K in keyof RpcRoutes & string]: {
-			requestId: string;
-			name: K;
-			reply:
-				| {
-						type: "response";
-						data: Static<RpcRoutes[K]["response"]>;
-				  }
-				| {
-						type: "error";
-						data: any;
-				  }
-				| {
-						[R in keyof RpcRoutes[K]["replies"] & string]: {
-							type: R;
-							data: Static<RpcRoutes[K]["replies"][R]>;
-						};
-				  }[keyof RpcRoutes[K]["replies"] & string];
-		};
-	}[keyof RpcRoutes & string];
+	[K in keyof RpcRoutes & string]: {
+		requestId: string;
+		name: K;
+		reply:
+			| {
+					type: "response";
+					data: Static<RpcRoutes[K]["response"]>;
+			  }
+			| {
+					type: "error";
+					data: any;
+			  }
+			| {
+					[R in keyof RpcRoutes[K]["replies"] & string]: {
+						type: R;
+						data: Static<RpcRoutes[K]["replies"][R]>;
+					};
+			  }[keyof RpcRoutes[K]["replies"] & string];
+	};
+}[keyof RpcRoutes & string];
 
 export interface ServerAdapters<
 	DataRoutes extends Record<string, TSchema>,
@@ -72,22 +72,22 @@ export interface ServerAdapters<
 export type RequestMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
-		[K in keyof RpcRoutes & string]: {
-			name: K;
-			params: ParamsOf<K>;
-			payload: Static<RpcRoutes[K]["payload"]>;
-		};
-	}[keyof RpcRoutes & string];
+	[K in keyof RpcRoutes & string]: {
+		name: K;
+		params: ParamsOf<K>;
+		payload: Static<RpcRoutes[K]["payload"]>;
+	};
+}[keyof RpcRoutes & string];
 
 export type SendMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
-		[K in keyof RpcRoutes & string]: {
-			name: K;
-			params: ParamsOf<K>;
-			payload: Static<RpcRoutes[K]["payload"]>;
-		};
-	}[keyof RpcRoutes & string];
+	[K in keyof RpcRoutes & string]: {
+		name: K;
+		params: ParamsOf<K>;
+		payload: Static<RpcRoutes[K]["payload"]>;
+	};
+}[keyof RpcRoutes & string];
 
 export interface ClientAdapters<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
@@ -98,8 +98,8 @@ export interface ClientAdapters<
 }
 
 export type RpcCallbacks<Def extends RpcDef<any, any, any, any>> = {
-		response?: (data: Static<Def["response"]>) => void;
-		error?: (err: any) => void;
-	} & {
-		[K in keyof Def["replies"]]?: (data: Static<Def["replies"][K]>) => void;
-	};
+	response?: (data: Static<Def["response"]>) => void;
+	error?: (err: any) => void;
+} & {
+	[K in keyof Def["replies"]]?: (data: Static<Def["replies"][K]>) => void;
+};
