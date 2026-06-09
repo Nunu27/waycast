@@ -174,6 +174,40 @@ socket.on("connect", () => {
 });
 ```
 
+## Utility Types (Custom Hooks)
+
+Waycast exports powerful generic utilities designed specifically to help you build your own strictly-typed framework wrappers (like React/Vue hooks). By extracting types directly from your `AppRouter`, your UI hooks get the exact same aggressive type-safety as the core library!
+
+```typescript
+import type { Static } from "typebox";
+import type { InferDataRoutes, InferRpcRoutes, ParamsOf } from "waycast";
+import { appRouter, type AppRouter } from "./router";
+
+type RpcRoutes = InferRpcRoutes<AppRouter>;
+type DataRoutes = InferDataRoutes<AppRouter>;
+
+// Build a custom strictly-typed React Hook!
+export function useWaycastData<T extends Extract<keyof DataRoutes, string>>(
+  topic: T,
+  params: ParamsOf<T>
+): Static<DataRoutes[T]> | undefined {
+  const [data, setData] = useState<Static<DataRoutes[T]>>();
+
+  useEffect(() => {
+    // Automatically subscribes on mount, and unsubscribes on unmount!
+    return client.onData(topic, params, (newData) => {
+      setData(newData);
+    });
+  }, [topic, JSON.stringify(params)]);
+
+  return data;
+}
+
+// In your component:
+// Fully typed! `params` forces { jobId: string }, and `data` is strongly inferred!
+const data = useWaycastData("job:[jobId]:process", { jobId: "123" });
+```
+
 ## License
 
 MIT
