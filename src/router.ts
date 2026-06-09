@@ -1,5 +1,5 @@
-import type { TArray, TObject, TSchema, TString, TVoid } from "typebox";
-import { Type } from "typebox";
+import type { TArray, TObject, TSchema, TString, TVoid } from "@sinclair/typebox";
+import { Type } from "@sinclair/typebox";
 import { ClientApp } from "./client";
 import { ServerApp } from "./server";
 import type { ClientAdapters, RpcDef, ServerAdapters } from "./types";

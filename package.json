@@ -27,7 +27,7 @@
 		"typescript": "^5"
 	},
 	"dependencies": {
-		"typebox": "^1.2.4"
+		"@sinclair/typebox": "^0.34.49"
 	},
 	"scripts": {
 		"prepare": "husky",

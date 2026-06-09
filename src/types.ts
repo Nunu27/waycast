@@ -1,4 +1,4 @@
-import type { Static, TSchema } from "typebox";
+import type { Static, TSchema } from "@sinclair/typebox";
 
 export type Prettify<in out T> = {
 	[K in keyof T]: T[K];
@@ -25,20 +25,17 @@ export interface RpcDef<
 	meta: Meta;
 }
 
-export type DataMessage<DataRoutes extends Record<string, TSchema>> = Prettify<
-	{
+export type DataMessage<DataRoutes extends Record<string, TSchema>> = {
 		[K in keyof DataRoutes & string]: {
 			name: K;
 			topic: string;
 			data: Static<DataRoutes[K]>;
 		};
-	}[keyof DataRoutes & string]
->;
+	}[keyof DataRoutes & string];
 
 export type RpcReplyMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
-> = Prettify<
-	{
+> = {
 		[K in keyof RpcRoutes & string]: {
 			requestId: string;
 			name: K;
@@ -58,8 +55,7 @@ export type RpcReplyMessage<
 						};
 				  }[keyof RpcRoutes[K]["replies"] & string];
 		};
-	}[keyof RpcRoutes & string]
->;
+	}[keyof RpcRoutes & string];
 
 export interface ServerAdapters<
 	DataRoutes extends Record<string, TSchema>,
@@ -75,27 +71,23 @@ export interface ServerAdapters<
 
 export type RequestMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
-> = Prettify<
-	{
+> = {
 		[K in keyof RpcRoutes & string]: {
 			name: K;
 			params: ParamsOf<K>;
 			payload: Static<RpcRoutes[K]["payload"]>;
 		};
-	}[keyof RpcRoutes & string]
->;
+	}[keyof RpcRoutes & string];
 
 export type SendMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
-> = Prettify<
-	{
+> = {
 		[K in keyof RpcRoutes & string]: {
 			name: K;
 			params: ParamsOf<K>;
 			payload: Static<RpcRoutes[K]["payload"]>;
 		};
-	}[keyof RpcRoutes & string]
->;
+	}[keyof RpcRoutes & string];
 
 export interface ClientAdapters<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
@@ -105,11 +97,9 @@ export interface ClientAdapters<
 	) => string | Promise<string> | void | Promise<void>;
 }
 
-export type RpcCallbacks<Def extends RpcDef<any, any, any, any>> = Prettify<
-	{
+export type RpcCallbacks<Def extends RpcDef<any, any, any, any>> = {
 		response?: (data: Static<Def["response"]>) => void;
 		error?: (err: any) => void;
 	} & {
 		[K in keyof Def["replies"]]?: (data: Static<Def["replies"][K]>) => void;
-	}
->;
+	};

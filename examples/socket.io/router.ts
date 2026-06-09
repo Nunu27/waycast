@@ -1,4 +1,4 @@
-import { Type as t } from "typebox";
+import { Type as t } from "@sinclair/typebox";
 import { Router } from "../../src/router";
 
 export interface Context {

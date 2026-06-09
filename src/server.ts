@@ -1,4 +1,4 @@
-import type { Static, TSchema } from "typebox";
+import type { Static, TSchema } from "@sinclair/typebox";
 import { Compile } from "typebox/compile";
 import {
 	type BuiltInRpcRoutes,
@@ -125,7 +125,7 @@ export class ServerApp<
 			this.adapters.topic?.subscribe(connectionId, replyTopic);
 
 			if (name === "_waycast:subscribe" || name === "_waycast:unsubscribe") {
-				const topics = payload?.topics as string[];
+				const topics = (payload as any)?.topics as string[];
 				if (Array.isArray(topics)) {
 					if (name === "_waycast:subscribe") {
 						this.adapters.topic?.subscribe(connectionId, ...topics);
