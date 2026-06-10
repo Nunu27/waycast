@@ -20,6 +20,7 @@ export type RpcContext<
 	Payload,
 	Replies extends Record<string, TSchema>,
 > = Prettify<{
+	connectionId: string;
 	requestId: string;
 	params: P;
 	context: Context;
@@ -151,6 +152,7 @@ export class ServerApp<
 			}
 
 			const ctx: RpcContext<any, any, any, any> = {
+				connectionId,
 				requestId,
 				params,
 				context,
