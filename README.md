@@ -107,8 +107,8 @@ server.on("job:[jobId]:process", async (ctx) => {
 
   return true; // Final response automatically sent
 })
-.onDispose("job:[jobId]:process", (requestId) => {
-  console.log(`Clean up request ${requestId} resources!`);
+.onDispose("job:[jobId]:process", (connectionId, requestId) => {
+  console.log(`Clean up request ${requestId} for connection ${connectionId}!`);
 });
 ```
 
@@ -117,7 +117,7 @@ Listen to the socket and pass the raw payload into Waycast. Waycast handles the 
 ```typescript
 // Clean up lingering RPCs when sockets leave rooms (or disconnect)
 io.of("/").adapter.on("leave-room", (room, id) => {
-  if (room.endsWith("|reply")) server.handleDispose(room);
+  if (room.endsWith("|reply")) server.handleDispose(id, room);
 });
 
 io.on("connection", (socket) => {

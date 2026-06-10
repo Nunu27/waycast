@@ -50,7 +50,7 @@ export class ServerApp<
 	private handlers = new Map<string, Handler<any, any, any, any, any>>();
 	private disposeHandlers = new Map<
 		string,
-		(requestId: string) => void | Promise<void>
+		(connectionId: string, requestId: string) => void | Promise<void>
 	>();
 
 	private compiledPayloads = new Map<string, any>();
@@ -84,13 +84,13 @@ export class ServerApp<
 
 	onDispose<Name extends Extract<keyof RpcRoutes, string>>(
 		name: Name,
-		handler: (requestId: string) => void | Promise<void>,
+		handler: (connectionId: string, requestId: string) => void | Promise<void>,
 	) {
 		this.disposeHandlers.set(name, handler);
 		return this;
 	}
 
-	async handleDispose(topic: string) {
+	async handleDispose(connectionId: string, topic: string) {
 		if (!topic.endsWith("|reply")) return;
 		const parts = topic.split("|");
 		if (parts.length < 3) return;
@@ -101,7 +101,7 @@ export class ServerApp<
 
 		const handler = this.disposeHandlers.get(name);
 		if (handler) {
-			await handler(requestId);
+			await handler(connectionId, requestId);
 		}
 	}
 

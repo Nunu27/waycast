@@ -69,16 +69,15 @@ server
 
 		return true;
 	})
-	.onDispose("job:[jobId]:process", (requestId) => {
+	.onDispose("job:[jobId]:process", (connectionId, requestId) => {
 		console.log(
-			`[Dispose] Request ${requestId} was aborted because the client disconnected!`,
+			`Clean up request ${requestId} for connection ${connectionId}!`,
 		);
 	});
 
-io.of("/").adapter.on("leave-room", (room, _id) => {
-	if (room.endsWith(":reply")) {
-		server.handleDispose(room);
-	}
+// 4. Clean up lingering RPCs when sockets leave rooms (or disconnect)
+io.of("/").adapter.on("leave-room", (room, id) => {
+	if (room.endsWith("|reply")) server.handleDispose(id, room);
 });
 
 io.on("connection", (socket) => {
