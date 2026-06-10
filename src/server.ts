@@ -1,5 +1,5 @@
 import type { Static, TSchema } from "@sinclair/typebox";
-import { TypeCompiler } from "@sinclair/typebox/compiler";
+import { type TypeCheck, TypeCompiler } from "@sinclair/typebox/compiler";
 import {
 	type BuiltInRpcRoutes,
 	buildDataTopic,
@@ -53,7 +53,7 @@ export class ServerApp<
 		(connectionId: string, requestId: string) => void | Promise<void>
 	>();
 
-	private compiledPayloads = new Map<string, any>();
+	private compiledPayloads = new Map<string, TypeCheck<any>>();
 
 	constructor(
 		private router: Router<Meta, DataRoutes, RpcRoutes>,
@@ -162,7 +162,7 @@ export class ServerApp<
 						name,
 						requestId,
 						reply: { type, data },
-					} as any);
+					});
 				},
 			};
 
@@ -172,15 +172,15 @@ export class ServerApp<
 					name,
 					requestId,
 					reply: { type: "response", data: response },
-				} as any);
+				});
 			}
-		} catch (error: any) {
+		} catch (error) {
 			this.adapters.topic?.unsubscribe(connectionId, replyTopic);
 			this.adapters.reply(replyTopic, {
 				name,
 				requestId,
-				reply: { type: "error", data: error.message || error },
-			} as any);
+				reply: { type: "error", data: error },
+			});
 		}
 	}
 
@@ -189,25 +189,25 @@ export class ServerApp<
 		params: ParamsOf<Name>,
 		data: Static<DataRoutes[Name]>,
 	) {
-		const topic = buildDataTopic(name, params as any);
-		this.adapters.emit(topic, { name, topic, data } as any);
+		const topic = buildDataTopic(name, params);
+		this.adapters.emit(topic, { name, topic, data });
 	}
 
-	reply<
-		Name extends Extract<keyof RpcRoutes, string>,
-		K extends Extract<keyof RpcRoutes[Name]["replies"], string>,
-	>(
+	reply<Name extends Extract<keyof RpcRoutes, string>>(
 		name: Name,
 		requestId: string,
-		type: K,
-		data: Static<RpcRoutes[Name]["replies"][K]>,
 	) {
-		const replyTopic = buildReplyTopic(name, requestId);
-		this.adapters.reply(replyTopic, {
-			name,
-			requestId,
-			reply: { type, data },
-		} as any);
+		return <K extends Extract<keyof RpcRoutes[Name]["replies"], string>>(
+			type: K,
+			data: Static<RpcRoutes[Name]["replies"][K]>,
+		) => {
+			const replyTopic = buildReplyTopic(name, requestId);
+			this.adapters.reply(replyTopic, {
+				name,
+				requestId,
+				reply: { type, data },
+			});
+		};
 	}
 
 	replyResponse<Name extends Extract<keyof RpcRoutes, string>>(
@@ -220,7 +220,7 @@ export class ServerApp<
 			name,
 			requestId,
 			reply: { type: "response", data },
-		} as any);
+		});
 	}
 
 	replyError<Name extends Extract<keyof RpcRoutes, string>>(
@@ -233,6 +233,6 @@ export class ServerApp<
 			name,
 			requestId,
 			reply: { type: "error", data: error },
-		} as any);
+		});
 	}
 }

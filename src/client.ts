@@ -41,7 +41,7 @@ export class ClientApp<
 			if (!active) return;
 			if (requestId) {
 				assignedReplyTopic = buildReplyTopic(name, requestId);
-				this.rpcCallbacks.set(assignedReplyTopic, callbacks as any);
+				this.rpcCallbacks.set(assignedReplyTopic, callbacks);
 			}
 		});
 

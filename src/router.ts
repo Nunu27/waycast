@@ -89,13 +89,13 @@ export class Router<
 	buildServer<Context = {}>(
 		adapters: ServerAdapters<DataRoutes, RpcRoutes & BuiltInRpcRoutes>,
 	): ServerApp<Context, Meta, DataRoutes, RpcRoutes> {
-		return new ServerApp(this as any, adapters);
+		return new ServerApp(this, adapters);
 	}
 
 	buildClient(
 		adapters: ClientAdapters<RpcRoutes & BuiltInRpcRoutes>,
 	): ClientApp<DataRoutes, RpcRoutes> {
-		return new ClientApp(this as any, adapters);
+		return new ClientApp(this, adapters);
 	}
 }
 
