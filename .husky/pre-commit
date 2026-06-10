@@ -1,3 +1,5 @@
+set -e
+
 echo "Checking TypeScript..."
 bunx tsc --noEmit
 
