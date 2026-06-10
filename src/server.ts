@@ -1,5 +1,5 @@
 import type { Static, TSchema } from "@sinclair/typebox";
-import { Compile } from "typebox/compile";
+import { TypeCompiler } from "@sinclair/typebox/compiler";
 import {
 	type BuiltInRpcRoutes,
 	buildDataTopic,
@@ -60,7 +60,7 @@ export class ServerApp<
 	) {
 		for (const [name, route] of Object.entries(this.router._rpcRoutes)) {
 			try {
-				this.compiledPayloads.set(name, Compile(route.payload));
+				this.compiledPayloads.set(name, TypeCompiler.Compile(route.payload));
 			} catch (e) {
 				console.warn(`Failed to compile schema for route ${name}:`, e);
 			}
