@@ -41,12 +41,15 @@ export type Handler<
 	ctx: RpcContext<P, Context, Payload, Replies>,
 ) => Promise<Response> | Response;
 
+export const DEFER = Symbol("waycast.defer");
+
 export class ServerApp<
 	Context,
 	Meta,
 	DataRoutes extends Record<string, TSchema>,
 	RpcRoutes extends Record<string, RpcDef<any, any, any, Meta>>,
 > {
+	public readonly defer = DEFER as any;
 	private handlers = new Map<string, Handler<any, any, any, any, any>>();
 	private disposeHandlers = new Map<
 		string,
@@ -167,7 +170,7 @@ export class ServerApp<
 			};
 
 			const response = await handler(ctx);
-			if (response !== undefined) {
+			if (response !== undefined && response !== DEFER) {
 				this.adapters.reply(replyTopic, {
 					name,
 					requestId,
