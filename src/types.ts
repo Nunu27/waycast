@@ -1,5 +1,11 @@
 import type { Static, TSchema } from "@sinclair/typebox";
 
+export interface AdapterLogger {
+	warn: (...args: any[]) => void;
+	error: (...args: any[]) => void;
+	[key: string]: any;
+}
+
 export type Prettify<in out T> = {
 	[K in keyof T]: T[K];
 } & {};
@@ -67,6 +73,7 @@ export interface ServerAdapters<
 	};
 	emit: (topic: string, message: DataMessage<DataRoutes>) => void;
 	reply: (topic: string, message: RpcReplyMessage<RpcRoutes>) => void;
+	logger?: AdapterLogger;
 }
 
 export type RequestMessage<
@@ -95,6 +102,7 @@ export interface ClientAdapters<
 	send: (
 		message: SendMessage<RpcRoutes>,
 	) => string | Promise<string> | void | Promise<void>;
+	logger?: AdapterLogger;
 }
 
 export type RpcCallbacks<Def extends RpcDef<any, any, any, any>> = {

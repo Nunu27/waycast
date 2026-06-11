@@ -3,7 +3,7 @@
 	"workspaces": [
 		"examples/*"
 	],
-	"version": "1.1.7",
+	"version": "1.1.8",
 	"main": "dist/index.js",
 	"module": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -20,6 +20,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.4.16",
 		"@types/bun": "latest",
+		"@types/pino": "^7.0.5",
 		"husky": "^9.1.7",
 		"lint-staged": "^17.0.7"
 	},

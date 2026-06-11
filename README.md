@@ -55,21 +55,42 @@ Waycast is a **transport-agnostic**, end-to-end typed RPC and Pub/Sub framework 
 Waycast introduces a clean three-layer architecture:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Router (Schema)                   │
-│   Shared between client & server. Defines all RPC   │
-│   routes and Pub/Sub topics using TypeBox schemas.   │
-└──────────────────┬──────────────────────────────────┘
-                   │  buildServer()       buildClient()
-         ┌─────────▼──────────┐   ┌──────────▼──────────┐
-         │    ServerApp        │   │     ClientApp        │
-         │  .on(route, handler)│   │  .rpc(route, ...)   │
-         │  .emit(topic, data) │   │  .onData(topic, ...) │
-         │  .handle(msg)       │   │  .handleData(msg)   │
-         └─────────┬───────────┘   └──────────┬──────────┘
-                   │   Your Transport Layer    │
-                   └───────────────────────────┘
-                   (Socket.io, WebSocket, WebRTC, etc.)
+┌────────────────────────────────────────────────────────────────────┐
+│                          Router (Schema)                           │
+│     Shared between client & server. Defines all RPC routes and     │
+│               Pub/Sub topics using TypeBox schemas.                │
+└─────────────────────────────────┬──────────────────────────────────┘
+                                  │
+          ┌── buildServer() ──────┴────── buildClient() ──┐
+          ▼                                               ▼
+┌──────────────────────────┐                    ┌──────────────────────────┐
+│        ServerApp         │                    │        ClientApp         │
+├──────────────────────────┤                    ├──────────────────────────┤
+│ [RPC]                    │                    │ [RPC]                    │
+│  .on(route, handler)     │                    │  .rpc(route) => dispose  │
+│                          │                    │                          │
+│ [Pub/Sub]                │                    │ [Pub/Sub]                │
+│  .emit(topic, data)      │                    │  .onData(topic)=> dispose│
+│                          │                    │                          │
+│ [Incoming]               │                    │ [Incoming]               │
+│  .handle(msg)            │                    │  .handleData(msg)        │
+└─────────┬────────────────┘                    └────────────────┬─────────┘
+          │                                                      │
+          ▼                                                      ▼
+┌──────────────────────────┐                    ┌──────────────────────────┐
+│      Server Adapter      │                    │      Client Adapter      │
+├──────────────────────────┤                    ├──────────────────────────┤
+│ - ACK System             │◄─── (Req ID) ─────►│ .send(msg) => string (ID)│
+│ - Reply/Error Callbacks  │                    │ .subscribe([topics])     │
+│                          │                    │ .unsubscribe([topics])   │
+└─────────┬────────────────┘                    └────────────────┬─────────┘
+          │                                                      │
+          └─────────────────────────┬────────────────────────────┘
+                                    ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                          Transport Layer                           │
+│               (Socket.io, WebSocket, WebRTC, etc.)                 │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 1. **You define** your RPC routes and Pub/Sub topics once in a shared `Router`.

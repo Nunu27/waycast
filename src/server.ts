@@ -66,7 +66,10 @@ export class ServerApp<
 			try {
 				this.compiledPayloads.set(name, TypeCompiler.Compile(route.payload));
 			} catch (e) {
-				console.warn(`Failed to compile schema for route ${name}:`, e);
+				this.adapters.logger?.warn(
+					{ error: e },
+					`Failed to compile schema for route ${name}:`,
+				);
 			}
 		}
 	}
@@ -104,7 +107,14 @@ export class ServerApp<
 
 		const handler = this.disposeHandlers.get(name);
 		if (handler) {
-			await handler(connectionId, requestId);
+			try {
+				await handler(connectionId, requestId);
+			} catch (error) {
+				this.adapters.logger?.error(
+					{ error },
+					`Error in onDispose handler for ${name}:`,
+				);
+			}
 		}
 	}
 
