@@ -38,9 +38,13 @@ export class ClientApp<
 
 		const res = this.adapters.send({ name, params, payload } as any);
 		Promise.resolve(res).then((requestId) => {
-			if (!active) return;
 			if (requestId) {
 				assignedReplyTopic = buildReplyTopic(name, requestId);
+				if (!active) {
+					// cancel() was called before the ACK arrived — unsubscribe now
+					this.unsubscribe([assignedReplyTopic]);
+					return;
+				}
 				this.rpcCallbacks.set(assignedReplyTopic, callbacks);
 			}
 		});
@@ -49,6 +53,7 @@ export class ClientApp<
 			active = false;
 			if (assignedReplyTopic) {
 				this.rpcCallbacks.delete(assignedReplyTopic);
+				this.unsubscribe([assignedReplyTopic]);
 			}
 		};
 	}
