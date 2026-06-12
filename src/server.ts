@@ -180,7 +180,7 @@ export class ServerApp<
 			};
 
 			const response = await handler(ctx);
-			if (response !== undefined && response !== DEFER) {
+			if (response !== DEFER) {
 				this.adapters.reply(replyTopic, {
 					name,
 					requestId,
