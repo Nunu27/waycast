@@ -1,10 +1,8 @@
 import type { Static, TSchema } from "@sinclair/typebox";
 
-export interface AdapterLogger {
-	warn: (...args: any[]) => void;
-	error: (...args: any[]) => void;
-	[key: string]: any;
-}
+import type { BaseLogger } from "pino";
+
+export type AdapterLogger = BaseLogger;
 
 export type Prettify<in out T> = {
 	[K in keyof T]: T[K];

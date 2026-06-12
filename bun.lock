@@ -10,12 +10,12 @@
       "devDependencies": {
         "@biomejs/biome": "2.4.16",
         "@types/bun": "latest",
-        "@types/pino": "^7.0.5",
+        "@types/pino": "*",
         "husky": "^9.1.7",
         "lint-staged": "^17.0.7",
       },
       "peerDependencies": {
-        "typescript": "^5",
+        "typescript": ">=5",
       },
     },
     "examples/socket.io": {

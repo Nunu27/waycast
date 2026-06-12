@@ -187,6 +187,10 @@ export class ServerApp<
 				});
 			}
 		} catch (error) {
+			this.adapters.logger?.error(
+				{ error },
+				`Error handling RPC route ${name}:`,
+			);
 			this.adapters.topic?.unsubscribe(connectionId, replyTopic);
 			this.adapters.reply(replyTopic, {
 				name,
