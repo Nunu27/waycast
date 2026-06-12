@@ -3,7 +3,7 @@
 	"workspaces": [
 		"examples/*"
 	],
-	"version": "1.1.11",
+	"version": "1.1.12",
 	"main": "dist/index.js",
 	"module": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -20,9 +20,9 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.4.16",
 		"@types/bun": "latest",
-		"@types/pino": "*",
 		"husky": "^9.1.7",
-		"lint-staged": "^17.0.7"
+		"lint-staged": "^17.0.7",
+		"pino": "*"
 	},
 	"peerDependencies": {
 		"typescript": ">=5"
