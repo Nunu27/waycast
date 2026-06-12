@@ -52,7 +52,7 @@ export type RpcReplyMessage<
 			  }
 			| {
 					type: "error";
-					data: any;
+					data: string;
 			  }
 			| {
 					[R in keyof RpcRoutes[K]["replies"] & string]: {
@@ -73,6 +73,7 @@ export interface ServerAdapters<
 	};
 	emit: (topic: string, message: DataMessage<DataRoutes>) => void;
 	reply: (topic: string, message: RpcReplyMessage<RpcRoutes>) => void;
+	errorFormatter?: (error: unknown) => string;
 	logger?: AdapterLogger;
 }
 
@@ -80,6 +81,7 @@ export type RequestMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
 	[K in keyof RpcRoutes & string]: {
+		requestId: string;
 		name: K;
 		params: ParamsOf<K>;
 		payload: Static<RpcRoutes[K]["payload"]>;
@@ -90,6 +92,7 @@ export type SendMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
 	[K in keyof RpcRoutes & string]: {
+		requestId: string;
 		name: K;
 		params: ParamsOf<K>;
 		payload: Static<RpcRoutes[K]["payload"]>;
@@ -99,15 +102,13 @@ export type SendMessage<
 export interface ClientAdapters<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > {
-	send: (
-		message: SendMessage<RpcRoutes>,
-	) => string | Promise<string> | void | Promise<void>;
+	send: (message: SendMessage<RpcRoutes>) => void | Promise<void>;
 	logger?: AdapterLogger;
 }
 
 export type RpcCallbacks<Def extends RpcDef<any, any, any, any>> = {
 	response?: (data: Static<Def["response"]>) => void;
-	error?: (err: any) => void;
+	error?: (err: string) => void;
 } & {
 	[K in keyof Def["replies"]]?: (data: Static<Def["replies"][K]>) => void;
 };

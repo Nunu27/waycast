@@ -12,6 +12,7 @@ import type {
 	RpcCallbacks,
 	RpcDef,
 	RpcReplyMessage,
+	SendMessage,
 } from "./types";
 
 export class ClientApp<
@@ -24,7 +25,7 @@ export class ClientApp<
 
 	constructor(
 		_router: Router<any, DataRoutes, RpcRoutes>,
-		private adapters: ClientAdapters<RpcRoutes & any>,
+		private adapters: ClientAdapters<RpcRoutes & BuiltInRpcRoutes>,
 	) {}
 
 	rpc<Name extends Extract<keyof RpcRoutes, string>>(
@@ -33,45 +34,46 @@ export class ClientApp<
 		payload: Static<RpcRoutes[Name]["payload"]>,
 		callbacks: RpcCallbacks<RpcRoutes[Name]>,
 	): () => void {
-		let active = true;
-		let assignedReplyTopic: string | undefined;
+		let _active = true;
 
-		const res = this.adapters.send({ name, params, payload } as any);
-		Promise.resolve(res).then((requestId) => {
-			if (requestId) {
-				assignedReplyTopic = buildReplyTopic(name, requestId);
-				if (!active) {
-					// cancel() was called before the ACK arrived — unsubscribe now
-					this.unsubscribe([assignedReplyTopic]);
-					return;
-				}
-				this.rpcCallbacks.set(assignedReplyTopic, callbacks);
-			}
+		const requestId = crypto.randomUUID();
+		const assignedReplyTopic = buildReplyTopic(name, requestId);
+
+		this.rpcCallbacks.set(assignedReplyTopic, callbacks);
+
+		const res = this.adapters.send({
+			requestId,
+			name,
+			params,
+			payload,
+		} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
+		Promise.resolve(res).catch((err) => {
+			this.adapters.logger?.error?.({ err }, "Failed to send RPC message");
 		});
 
 		return () => {
-			active = false;
-			if (assignedReplyTopic) {
-				this.rpcCallbacks.delete(assignedReplyTopic);
-				this.unsubscribe([assignedReplyTopic]);
-			}
+			_active = false;
+			this.rpcCallbacks.delete(assignedReplyTopic);
+			this.unsubscribe([assignedReplyTopic]);
 		};
 	}
 
 	subscribe(topics: string[]) {
 		this.adapters.send({
+			requestId: crypto.randomUUID(),
 			name: "_waycast:subscribe",
 			params: undefined,
 			payload: { topics },
-		});
+		} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
 	}
 
 	unsubscribe(topics: string[]) {
 		this.adapters.send({
+			requestId: crypto.randomUUID(),
 			name: "_waycast:unsubscribe",
 			params: undefined,
 			payload: { topics },
-		});
+		} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
 	}
 
 	resubscribe() {

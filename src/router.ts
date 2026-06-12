@@ -51,7 +51,11 @@ export class Router<
 		schema: Schema,
 	): Router<Meta, DataRoutes & { [K in Name]: Schema }, RpcRoutes> {
 		this._dataRoutes[name] = schema;
-		return this as any;
+		return this as unknown as Router<
+			Meta,
+			DataRoutes & { [K in Name]: Schema },
+			RpcRoutes
+		>;
 	}
 
 	rpc<
@@ -68,7 +72,11 @@ export class Router<
 		RpcRoutes & { [K in Name]: RpcDef<Payload, Replies, Response, Meta> }
 	> {
 		this._rpcRoutes[name] = def;
-		return this as any;
+		return this as unknown as Router<
+			Meta,
+			DataRoutes,
+			RpcRoutes & { [K in Name]: RpcDef<Payload, Replies, Response, Meta> }
+		>;
 	}
 
 	merge<
@@ -79,11 +87,15 @@ export class Router<
 	): Router<Meta, DataRoutes & OtherData, RpcRoutes & OtherRpc> {
 		this._dataRoutes = { ...this._dataRoutes, ...other._dataRoutes };
 		this._rpcRoutes = { ...this._rpcRoutes, ...other._rpcRoutes };
-		return this as any;
+		return this as unknown as Router<
+			Meta,
+			DataRoutes & OtherData,
+			RpcRoutes & OtherRpc
+		>;
 	}
 
-	_getRpcRoute(name: string): any {
-		return this._rpcRoutes[name];
+	_getRpcRoute<K extends keyof RpcRoutes>(name: K): RpcRoutes[K] {
+		return this._rpcRoutes[name as string] as RpcRoutes[K];
 	}
 
 	buildServer<Context = {}>(

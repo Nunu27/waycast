@@ -13,10 +13,7 @@ type MyDataRoutes = InferDataRoutes<AppRouter>;
 type MyRpcRoutes = InferRpcRoutes<AppRouter> & BuiltInRpcRoutes;
 
 interface ClientToServerEvents {
-	rpc: (
-		message: RequestMessage<MyRpcRoutes>,
-		ack: (requestId: string) => void,
-	) => void;
+	rpc: (message: RequestMessage<MyRpcRoutes>) => void;
 }
 
 interface ServerToClientEvents {
@@ -83,12 +80,9 @@ io.of("/").adapter.on("leave-room", (room, id) => {
 io.on("connection", (socket) => {
 	console.log(`Client connected: ${socket.id}`);
 
-	socket.on("rpc", (message, ack) => {
-		const requestId = Math.random().toString(36).slice(2);
-		if (ack) ack(requestId);
-
+	socket.on("rpc", (message) => {
 		// We inject the socket id and build the context
-		server.handle(socket.id, requestId, message, async (_meta) => {
+		server.handle(socket.id, message, async (_meta) => {
 			return { userId: "user-123" };
 		});
 	});

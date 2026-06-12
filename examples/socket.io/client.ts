@@ -7,17 +7,13 @@ import type {
 	RequestMessage,
 	RpcReplyMessage,
 } from "../../src";
-import { buildReplyTopic } from "../../src";
 import { type AppRouter, appRouter } from "./router";
 
 type MyDataRoutes = InferDataRoutes<AppRouter>;
 type MyRpcRoutes = InferRpcRoutes<AppRouter> & BuiltInRpcRoutes;
 
 interface ClientToServerEvents {
-	rpc: (
-		message: RequestMessage<MyRpcRoutes>,
-		ack: (requestId: string) => void,
-	) => void;
+	rpc: (message: RequestMessage<MyRpcRoutes>) => void;
 }
 
 interface ServerToClientEvents {
@@ -31,11 +27,7 @@ const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(
 
 const client = appRouter.buildClient({
 	send: (message) => {
-		return new Promise<string>((resolve) => {
-			socket.emit("rpc", message, (requestId) => {
-				resolve(buildReplyTopic(message.name, requestId));
-			});
-		});
+		socket.emit("rpc", message);
 	},
 });
 

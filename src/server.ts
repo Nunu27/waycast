@@ -31,6 +31,8 @@ export type RpcContext<
 	) => void;
 }>;
 
+export const DEFER = "__waycast_defer__" as const;
+
 export type Handler<
 	P,
 	Context,
@@ -39,9 +41,7 @@ export type Handler<
 	Replies extends Record<string, TSchema>,
 > = (
 	ctx: RpcContext<P, Context, Payload, Replies>,
-) => Promise<Response> | Response;
-
-export const DEFER = Symbol("waycast.defer");
+) => Promise<Response | typeof DEFER> | Response | typeof DEFER;
 
 export class ServerApp<
 	Context,
@@ -49,7 +49,7 @@ export class ServerApp<
 	DataRoutes extends Record<string, TSchema>,
 	RpcRoutes extends Record<string, RpcDef<any, any, any, Meta>>,
 > {
-	public readonly defer = DEFER as any;
+	public readonly defer: typeof DEFER = DEFER;
 	private handlers = new Map<string, Handler<any, any, any, any, any>>();
 	private disposeHandlers = new Map<
 		string,
@@ -84,7 +84,7 @@ export class ServerApp<
 			RpcRoutes[Name]["replies"]
 		>,
 	) {
-		this.handlers.set(name, handler as any);
+		this.handlers.set(name, handler as Handler<any, any, any, any, any>);
 		return this;
 	}
 
@@ -120,11 +120,10 @@ export class ServerApp<
 
 	async handle(
 		connectionId: string,
-		requestId: string,
 		message: RequestMessage<RpcRoutes & BuiltInRpcRoutes>,
 		middleware?: (meta?: Meta) => Promise<Context> | Context,
 	) {
-		const { name, params, payload } = message;
+		const { name, params, payload, requestId } = message;
 		const replyTopic = buildReplyTopic(name, requestId);
 
 		try {
@@ -139,7 +138,7 @@ export class ServerApp<
 			this.adapters.topic?.subscribe(connectionId, replyTopic);
 
 			if (name === "_waycast:subscribe" || name === "_waycast:unsubscribe") {
-				const topics = (payload as any)?.topics as string[];
+				const topics = (payload as { topics?: string[] })?.topics;
 				if (Array.isArray(topics)) {
 					if (name === "_waycast:subscribe") {
 						this.adapters.topic?.subscribe(connectionId, ...topics);
@@ -192,7 +191,14 @@ export class ServerApp<
 			this.adapters.reply(replyTopic, {
 				name,
 				requestId,
-				reply: { type: "error", data: error },
+				reply: {
+					type: "error",
+					data: this.adapters.errorFormatter
+						? this.adapters.errorFormatter(error)
+						: error instanceof Error
+							? error.message
+							: String(error),
+				},
 			});
 		}
 	}
