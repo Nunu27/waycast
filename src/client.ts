@@ -34,8 +34,6 @@ export class ClientApp<
 		payload: Static<RpcRoutes[Name]["payload"]>,
 		callbacks: RpcCallbacks<RpcRoutes[Name]>,
 	): () => void {
-		let _active = true;
-
 		const requestId = crypto.randomUUID();
 		const assignedReplyTopic = buildReplyTopic(name, requestId);
 
@@ -52,7 +50,6 @@ export class ClientApp<
 		});
 
 		return () => {
-			_active = false;
 			this.rpcCallbacks.delete(assignedReplyTopic);
 			this.unsubscribe([assignedReplyTopic]);
 		};
