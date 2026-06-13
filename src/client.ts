@@ -39,6 +39,11 @@ export class ClientApp<
 
 		this.rpcCallbacks.set(assignedReplyTopic, callbacks);
 
+		this.adapters.logger?.debug?.(
+			{ requestId, name, params, payload, assignedReplyTopic },
+			"Initiating RPC request",
+		);
+
 		const res = this.adapters.send({
 			requestId,
 			name,
@@ -50,12 +55,17 @@ export class ClientApp<
 		});
 
 		return () => {
+			this.adapters.logger?.debug?.(
+				{ requestId, name, assignedReplyTopic },
+				"Cleaning up RPC request callbacks",
+			);
 			this.rpcCallbacks.delete(assignedReplyTopic);
 			this.unsubscribe([assignedReplyTopic]);
 		};
 	}
 
 	subscribe(topics: string[]) {
+		this.adapters.logger?.debug?.({ topics }, "Sending subscribe request");
 		this.adapters.send({
 			requestId: crypto.randomUUID(),
 			name: "_waycast:subscribe",
@@ -65,6 +75,7 @@ export class ClientApp<
 	}
 
 	unsubscribe(topics: string[]) {
+		this.adapters.logger?.debug?.({ topics }, "Sending unsubscribe request");
 		this.adapters.send({
 			requestId: crypto.randomUUID(),
 			name: "_waycast:unsubscribe",
@@ -75,6 +86,10 @@ export class ClientApp<
 
 	resubscribe() {
 		const activeTopics = Array.from(this.dataListeners.keys());
+		this.adapters.logger?.debug?.(
+			{ activeTopics },
+			"Triggering resubscription for active topics",
+		);
 		if (activeTopics.length > 0) {
 			this.subscribe(activeTopics);
 		}
@@ -82,6 +97,10 @@ export class ClientApp<
 
 	clear() {
 		const activeTopics = Array.from(this.dataListeners.keys());
+		this.adapters.logger?.debug?.(
+			{ activeTopics, rpcCallbacksCount: this.rpcCallbacks.size },
+			"Clearing all client active topics, listeners, and RPC callbacks",
+		);
 		if (activeTopics.length > 0) {
 			this.unsubscribe(activeTopics);
 		}
@@ -102,6 +121,10 @@ export class ClientApp<
 		this.dataListeners.get(topic)?.add(callback);
 
 		const refCount = this.dataRouteRefCounts.get(topic) || 0;
+		this.adapters.logger?.debug?.(
+			{ name, params, topic, refCount: refCount + 1 },
+			"Subscribing to data topic listener",
+		);
 		if (refCount === 0) {
 			this.subscribe([topic]);
 		}
@@ -117,6 +140,10 @@ export class ClientApp<
 			}
 
 			const newCount = (this.dataRouteRefCounts.get(topic) || 1) - 1;
+			this.adapters.logger?.debug?.(
+				{ name, params, topic, newCount },
+				"Unsubscribing from data topic listener",
+			);
 			if (newCount <= 0) {
 				this.unsubscribe([topic]);
 				this.dataRouteRefCounts.delete(topic);
@@ -128,17 +155,36 @@ export class ClientApp<
 
 	handleData(message: DataMessage<DataRoutes>) {
 		const topic = message.topic;
+		this.adapters.logger?.debug?.(
+			{ topic, name: message.name, data: message.data },
+			"Received data message",
+		);
 		const listeners = this.dataListeners.get(topic);
 		if (listeners) {
 			for (const cb of listeners) {
 				cb(message.data);
 			}
+		} else {
+			this.adapters.logger?.debug?.(
+				{ topic, name: message.name },
+				"No listeners registered for data topic",
+			);
 		}
 	}
 
 	handleReply(message: RpcReplyMessage<RpcRoutes & BuiltInRpcRoutes>) {
 		const { name, requestId, reply } = message;
 		const replyTopic = buildReplyTopic(name, requestId);
+		this.adapters.logger?.debug?.(
+			{
+				name,
+				requestId,
+				replyTopic,
+				replyType: reply.type,
+				replyData: reply.data,
+			},
+			"Received RPC reply",
+		);
 		const callbacks = this.rpcCallbacks.get(replyTopic);
 		if (callbacks) {
 			callbacks[reply.type]?.(reply.data);
@@ -146,6 +192,11 @@ export class ClientApp<
 			if (reply.type === "response" || reply.type === "error") {
 				this.rpcCallbacks.delete(replyTopic);
 			}
+		} else {
+			this.adapters.logger?.debug?.(
+				{ name, requestId, replyTopic },
+				"No callback found for reply topic",
+			);
 		}
 	}
 }

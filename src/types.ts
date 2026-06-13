@@ -2,7 +2,10 @@ import type { Static, TSchema } from "@sinclair/typebox";
 
 import type { BaseLogger } from "pino";
 
-export type AdapterLogger = BaseLogger;
+export type AdapterLogger = Pick<
+	BaseLogger,
+	"debug" | "info" | "warn" | "error"
+>;
 
 export type Prettify<in out T> = {
 	[K in keyof T]: T[K];

@@ -65,6 +65,10 @@ export class ServerApp<
 		for (const [name, route] of Object.entries(this.router._rpcRoutes)) {
 			try {
 				this.compiledPayloads.set(name, TypeCompiler.Compile(route.payload));
+				this.adapters.logger?.debug?.(
+					{ name },
+					"Compiled payload schema for route",
+				);
 			} catch (e) {
 				this.adapters.logger?.warn(
 					{ error: e },
@@ -84,6 +88,7 @@ export class ServerApp<
 			RpcRoutes[Name]["replies"]
 		>,
 	) {
+		this.adapters.logger?.debug?.({ name }, "Registered RPC handler");
 		this.handlers.set(name, handler as Handler<any, any, any, any, any>);
 		return this;
 	}
@@ -92,6 +97,7 @@ export class ServerApp<
 		name: Name,
 		handler: (connectionId: string, requestId: string) => void | Promise<void>,
 	) {
+		this.adapters.logger?.debug?.({ name }, "Registered dispose handler");
 		this.disposeHandlers.set(name, handler);
 		return this;
 	}
@@ -106,6 +112,10 @@ export class ServerApp<
 		const name = parts.slice(0, parts.length - 2).join("|");
 
 		const handler = this.disposeHandlers.get(name);
+		this.adapters.logger?.debug?.(
+			{ connectionId, topic, name, requestId, hasHandler: !!handler },
+			"Handling dispose / cleanup for reply topic",
+		);
 		if (handler) {
 			try {
 				await handler(connectionId, requestId);
@@ -126,6 +136,11 @@ export class ServerApp<
 		const { name, params, payload, requestId } = message;
 		const replyTopic = buildReplyTopic(name, requestId);
 
+		this.adapters.logger?.debug?.(
+			{ connectionId, name, requestId, params, payload },
+			"Received RPC request on server",
+		);
+
 		try {
 			const compiler = this.compiledPayloads.get(name);
 			if (compiler && !compiler.Check(payload)) {
@@ -136,9 +151,17 @@ export class ServerApp<
 			}
 
 			this.adapters.topic?.subscribe(connectionId, replyTopic);
+			this.adapters.logger?.debug?.(
+				{ connectionId, replyTopic },
+				"Subscribed connection to reply topic",
+			);
 
 			if (name === "_waycast:subscribe" || name === "_waycast:unsubscribe") {
 				const topics = (payload as { topics?: string[] })?.topics;
+				this.adapters.logger?.debug?.(
+					{ connectionId, name, topics },
+					"Handling built-in subscription message",
+				);
 				if (Array.isArray(topics)) {
 					if (name === "_waycast:subscribe") {
 						this.adapters.topic?.subscribe(connectionId, ...topics);
@@ -158,6 +181,10 @@ export class ServerApp<
 			let context: Context;
 
 			if (middleware) {
+				this.adapters.logger?.debug?.(
+					{ connectionId, name, requestId },
+					"Executing middleware for RPC route",
+				);
 				context = await middleware(rpcDef.meta);
 			} else {
 				context = {} as Context;
@@ -170,6 +197,10 @@ export class ServerApp<
 				context,
 				payload,
 				reply: (type, data) => {
+					this.adapters.logger?.debug?.(
+						{ connectionId, name, requestId, replyTopic, type, data },
+						"Sending RPC intermediate reply",
+					);
 					this.adapters.reply(replyTopic, {
 						name,
 						requestId,
@@ -179,6 +210,10 @@ export class ServerApp<
 			};
 
 			const response = await handler(ctx);
+			this.adapters.logger?.debug?.(
+				{ connectionId, name, requestId, responseDeferred: response === DEFER },
+				"RPC route handler completed",
+			);
 			if (response !== DEFER) {
 				this.adapters.reply(replyTopic, {
 					name,
@@ -213,6 +248,10 @@ export class ServerApp<
 		data: Static<DataRoutes[Name]>,
 	) {
 		const topic = buildDataTopic(name, params);
+		this.adapters.logger?.debug?.(
+			{ name, params, topic, data },
+			"Emitting data event",
+		);
 		this.adapters.emit(topic, { name, topic, data });
 	}
 
@@ -225,6 +264,10 @@ export class ServerApp<
 			data: Static<RpcRoutes[Name]["replies"][K]>,
 		) => {
 			const replyTopic = buildReplyTopic(name, requestId);
+			this.adapters.logger?.debug?.(
+				{ name, requestId, replyTopic, type, data },
+				"Sending RPC intermediate reply (standalone)",
+			);
 			this.adapters.reply(replyTopic, {
 				name,
 				requestId,
@@ -239,6 +282,10 @@ export class ServerApp<
 		data: Static<RpcRoutes[Name]["response"]>,
 	) {
 		const replyTopic = buildReplyTopic(name, requestId);
+		this.adapters.logger?.debug?.(
+			{ name, requestId, replyTopic, data },
+			"Sending RPC final response reply (standalone)",
+		);
 		this.adapters.reply(replyTopic, {
 			name,
 			requestId,
@@ -252,6 +299,10 @@ export class ServerApp<
 		error: string,
 	) {
 		const replyTopic = buildReplyTopic(name, requestId);
+		this.adapters.logger?.debug?.(
+			{ name, requestId, replyTopic, error },
+			"Sending RPC error reply (standalone)",
+		);
 		this.adapters.reply(replyTopic, {
 			name,
 			requestId,
