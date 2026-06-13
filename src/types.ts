@@ -81,23 +81,23 @@ export interface ServerAdapters<
 export type RequestMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
-	[K in keyof RpcRoutes & string]: {
+	[K in keyof RpcRoutes & string]: Prettify<{
 		requestId: string;
 		name: K;
 		params: ParamsOf<K>;
 		payload: Static<RpcRoutes[K]["payload"]>;
-	};
+	}>;
 }[keyof RpcRoutes & string];
 
 export type SendMessage<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > = {
-	[K in keyof RpcRoutes & string]: {
+	[K in keyof RpcRoutes & string]: Prettify<{
 		requestId: string;
 		name: K;
 		params: ParamsOf<K>;
 		payload: Static<RpcRoutes[K]["payload"]>;
-	};
+	}>;
 }[keyof RpcRoutes & string];
 
 export interface ClientAdapters<

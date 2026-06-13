@@ -112,19 +112,19 @@ export class ServerApp<
 		const name = parts.slice(0, parts.length - 2).join("|");
 
 		const handler = this.disposeHandlers.get(name);
+		if (!handler) return;
+
 		this.adapters.logger?.debug?.(
-			{ connectionId, topic, name, requestId, hasHandler: !!handler },
+			{ connectionId, topic, name, requestId },
 			"Handling dispose / cleanup for reply topic",
 		);
-		if (handler) {
-			try {
-				await handler(connectionId, requestId);
-			} catch (error) {
-				this.adapters.logger?.error(
-					{ error },
-					`Error in onDispose handler for ${name}:`,
-				);
-			}
+		try {
+			await handler(connectionId, requestId);
+		} catch (error) {
+			this.adapters.logger?.error(
+				{ error },
+				`Error in onDispose handler for ${name}:`,
+			);
 		}
 	}
 
@@ -158,10 +158,6 @@ export class ServerApp<
 
 			if (name === "_waycast:subscribe" || name === "_waycast:unsubscribe") {
 				const topics = (payload as { topics?: string[] })?.topics;
-				this.adapters.logger?.debug?.(
-					{ connectionId, name, topics },
-					"Handling built-in subscription message",
-				);
 				if (Array.isArray(topics)) {
 					if (name === "_waycast:subscribe") {
 						this.adapters.topic?.subscribe(connectionId, ...topics);
