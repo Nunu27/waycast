@@ -64,28 +64,69 @@ export class ClientApp<
 		};
 	}
 
+	private pendingSubscribes = new Set<string>();
+	private pendingUnsubscribes = new Set<string>();
+	private flushScheduled = false;
+
+	private scheduleFlush() {
+		if (this.flushScheduled) return;
+		this.flushScheduled = true;
+		Promise.resolve().then(() => {
+			this.flushScheduled = false;
+
+			if (this.pendingSubscribes.size > 0) {
+				const topics = Array.from(this.pendingSubscribes);
+				this.pendingSubscribes.clear();
+				this.adapters.logger?.debug?.(
+					{ topics },
+					"Sending batched subscribe request",
+				);
+				this.adapters.send({
+					requestId: crypto.randomUUID(),
+					name: "_waycast:subscribe",
+					params: undefined,
+					payload: { topics },
+				} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
+			}
+
+			if (this.pendingUnsubscribes.size > 0) {
+				const topics = Array.from(this.pendingUnsubscribes);
+				this.pendingUnsubscribes.clear();
+				this.adapters.logger?.debug?.(
+					{ topics },
+					"Sending batched unsubscribe request",
+				);
+				this.adapters.send({
+					requestId: crypto.randomUUID(),
+					name: "_waycast:unsubscribe",
+					params: undefined,
+					payload: { topics },
+				} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
+			}
+		});
+	}
+
 	subscribe(topics: string[]) {
-		this.adapters.logger?.debug?.({ topics }, "Sending subscribe request");
-		this.adapters.send({
-			requestId: crypto.randomUUID(),
-			name: "_waycast:subscribe",
-			params: undefined,
-			payload: { topics },
-		} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
+		for (const topic of topics) {
+			this.pendingUnsubscribes.delete(topic);
+			this.pendingSubscribes.add(topic);
+		}
+		this.scheduleFlush();
 	}
 
 	unsubscribe(topics: string[]) {
-		this.adapters.logger?.debug?.({ topics }, "Sending unsubscribe request");
-		this.adapters.send({
-			requestId: crypto.randomUUID(),
-			name: "_waycast:unsubscribe",
-			params: undefined,
-			payload: { topics },
-		} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
+		for (const topic of topics) {
+			this.pendingSubscribes.delete(topic);
+			this.pendingUnsubscribes.add(topic);
+		}
+		this.scheduleFlush();
 	}
 
 	resubscribe() {
-		const activeTopics = Array.from(this.dataListeners.keys());
+		const activeTopics = [
+			...this.dataListeners.keys(),
+			...this.rpcCallbacks.keys(),
+		];
 		this.adapters.logger?.debug?.(
 			{ activeTopics },
 			"Triggering resubscription for active topics",
@@ -96,7 +137,10 @@ export class ClientApp<
 	}
 
 	clear() {
-		const activeTopics = Array.from(this.dataListeners.keys());
+		const activeTopics = [
+			...this.dataListeners.keys(),
+			...this.rpcCallbacks.keys(),
+		];
 		this.adapters.logger?.debug?.(
 			{ activeTopics, rpcCallbacksCount: this.rpcCallbacks.size },
 			"Clearing all client active topics, listeners, and RPC callbacks",
@@ -189,7 +233,7 @@ export class ClientApp<
 		if (callbacks) {
 			callbacks[reply.type]?.(reply.data);
 
-			if (reply.type === "response" || reply.type === "error") {
+			if (reply.type === "error") {
 				this.rpcCallbacks.delete(replyTopic);
 			}
 		} else {

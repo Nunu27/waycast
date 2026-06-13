@@ -150,12 +150,6 @@ export class ServerApp<
 				);
 			}
 
-			this.adapters.topic?.subscribe(connectionId, replyTopic);
-			this.adapters.logger?.debug?.(
-				{ connectionId, replyTopic },
-				"Subscribed connection to reply topic",
-			);
-
 			if (name === "_waycast:subscribe" || name === "_waycast:unsubscribe") {
 				const topics = (payload as { topics?: string[] })?.topics;
 				if (Array.isArray(topics)) {
@@ -167,6 +161,12 @@ export class ServerApp<
 				}
 				return;
 			}
+
+			this.adapters.topic?.subscribe(connectionId, replyTopic);
+			this.adapters.logger?.debug?.(
+				{ connectionId, replyTopic },
+				"Subscribed connection to reply topic",
+			);
 
 			const handler = this.handlers.get(name);
 			if (!handler) {
