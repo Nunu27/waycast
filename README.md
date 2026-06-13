@@ -73,7 +73,7 @@ Waycast introduces a clean three-layer architecture:
 │  .emit(topic, data)      │                    │  .onData(topic)=> dispose│
 │                          │                    │                          │
 │ [Incoming]               │                    │ [Incoming]               │
-│  .handle(msg)            │                    │  .handleData(msg)        │
+│  .handle(connId, msg)    │                    │  .handleData(msg)        │
 └─────────┬────────────────┘                    └────────────────┬─────────┘
           │                                                      │
           ▼                                                      ▼
@@ -180,7 +180,7 @@ type MyDataRoutes = InferDataRoutes<AppRouter>;
 type MyRpcRoutes  = InferRpcRoutes<AppRouter> & BuiltInRpcRoutes;
 
 const io = new Server<
-  { rpc: (message: RequestMessage<MyRpcRoutes>, ack: (requestId: string) => void) => void },
+  { rpc: (message: RequestMessage<MyRpcRoutes>) => void },
   { data: (message: DataMessage<MyDataRoutes>) => void; reply: (message: RpcReplyMessage<MyRpcRoutes>) => void }
 >(3000);
 ```
@@ -190,9 +190,6 @@ const io = new Server<
 Tell Waycast how to subscribe/unsubscribe connections and how to transmit messages over your transport layer.
 
 ```typescript
-import { appRouter } from "./router";
-import type { Context } from "./router";
-
 const server = appRouter.buildServer<Context>({
   topic: {
     subscribe:   (connId, ...topics) => io.sockets.sockets.get(connId)?.join(topics),
@@ -200,6 +197,10 @@ const server = appRouter.buildServer<Context>({
   },
   emit:  (topic, message) => io.to(topic).emit("data", message),
   reply: (topic, message) => io.to(topic).emit("reply", message),
+  // Optional: Custom error formatting for client replies
+  errorFormatter: (err) => err instanceof Error ? err.message : String(err),
+  // Optional: Logger adapter (e.g. console, pino, etc.)
+  logger: console,
 });
 ```
 
@@ -231,11 +232,8 @@ io.of("/").adapter.on("leave-room", (room, id) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("rpc", (message, ack) => {
-    const requestId = Math.random().toString(36).slice(2);
-    if (ack) ack(requestId);
-
-    server.handle(socket.id, requestId, message, async (meta) => {
+  socket.on("rpc", (message) => {
+    server.handle(socket.id, message, async (meta) => {
       // meta is typed as your Meta interface: { requireAuth?: boolean }
       // Use it to authenticate, then return the Context object for your handler
       return { userId: "user-123" };
@@ -264,12 +262,11 @@ import { appRouter } from "./router";
 const socket = io("http://localhost:3000");
 
 const client = appRouter.buildClient({
-  send: (message) =>
-    new Promise((resolve) => {
-      socket.emit("rpc", message, (requestId: string) => {
-        resolve(requestId); // Resolve once the server ACKs with a requestId
-      });
-    }),
+  send: (message) => {
+    socket.emit("rpc", message);
+  },
+  // Optional: Logger adapter (e.g. console, pino, etc.)
+  logger: console,
 });
 ```
 
@@ -454,7 +451,7 @@ Returned by `router.buildServer()`.
 | `.on()` | `(name, handler)` → `this` | Register an RPC handler. Chainable. |
 | `.onDispose()` | `(name, handler)` → `this` | Register a cleanup handler called when client disconnects mid-RPC. Chainable. |
 | `.emit()` | `(name, params, data)` | Publish a typed message to a Pub/Sub topic |
-| `.handle()` | `(connId, reqId, message, middleware?)` | Route an incoming message. Call this from your transport listener. |
+| `.handle()` | `(connectionId, message, middleware?)` | Route an incoming message. Call this from your transport listener. |
 | `.handleDispose()` | `(connId, topic)` | Trigger disposal for a dropped reply topic. Call on `leave-room` / disconnect. |
 | `.reply()` | `(name, requestId)` → `(type, data) => void` | Send an intermediate reply from outside the handler context |
 | `.replyResponse()` | `(name, requestId, data)` | Send the final response from outside the handler context |
@@ -498,8 +495,8 @@ Returned by `router.buildClient()`.
 | `RequestMessage<RpcRoutes>` | The wire format for an incoming RPC message (for typing your transport server) |
 | `DataMessage<DataRoutes>` | The wire format for an outgoing Pub/Sub message (for typing your transport server) |
 | `RpcReplyMessage<RpcRoutes>` | The wire format for an RPC reply message (for typing your transport server) |
-| `ServerAdapters<...>` | The adapter interface you implement to connect Waycast to your transport |
-| `ClientAdapters<...>` | The adapter interface you implement on the client side |
+| `ServerAdapters<...>` | The adapter interface you implement to connect Waycast to your transport (includes `topic`, `emit`, `reply`, optional `errorFormatter`, and optional `logger`) |
+| `ClientAdapters<...>` | The adapter interface you implement on the client side (includes `send` and optional `logger`) |
 | `BuiltInRpcRoutes` | Type for the built-in `_waycast:subscribe` / `_waycast:unsubscribe` routes |
 | `RpcContext<...>` | The type of the `ctx` object passed to your RPC handler |
 | `RpcDef<...>` | The type of a single RPC route definition |
