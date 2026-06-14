@@ -194,7 +194,9 @@ const server = appRouter.buildServer<Context>({
   topic: {
     subscribe:   (connId, ...topics) => io.sockets.sockets.get(connId)?.join(topics),
     unsubscribe: (connId, ...topics) => topics.forEach(t => io.sockets.sockets.get(connId)?.leave(t)),
+    hasSubscriber: (topic) => (io.sockets.adapter.rooms.get(topic)?.size ?? 0) > 0,
   },
+  isClientConnected: (connId) => io.sockets.sockets.has(connId),
   emit:  (topic, message) => io.to(topic).emit("data", message),
   reply: (topic, message) => io.to(topic).emit("reply", message),
   // Optional: Custom error formatting for client replies
@@ -226,9 +228,9 @@ server
 **Step 4 — Hook up the socket:**
 
 ```typescript
-// Clean up lingering RPCs when a socket leaves a reply room
+// Clean up lingering RPCs when a socket leaves a room
 io.of("/").adapter.on("leave-room", (room, id) => {
-  if (room.endsWith("|reply")) server.handleDispose(id, room);
+  server.handleUnsubscribe(id, room);
 });
 
 io.on("connection", (socket) => {
@@ -275,6 +277,9 @@ const client = appRouter.buildClient({
 ```typescript
 socket.on("data",  (msg) => client.handleData(msg));
 socket.on("reply", (msg) => client.handleReply(msg));
+
+socket.on("disconnect", () => client.handleDisconnect());
+socket.io.on("reconnect", () => client.resubscribe());
 ```
 
 **Step 3 — Call RPCs & subscribe to data streams:**
@@ -350,6 +355,26 @@ export function registerUserHandlers(server: AppServer) {
 const server = appRouter.buildServer<Context>(adapters);
 registerUserHandlers(server);
 ```
+
+---
+
+## Handling Client Disconnects
+
+When clients drop connection due to network instability, Waycast can gracefully debounce the disposal of their active RPCs, giving them a brief window to reconnect and resume where they left off.
+
+To enable this, configure the `maxDisconnectionDuration` on your Router:
+
+```typescript
+export const appRouter = new Router<Meta>({
+  maxDisconnectionDuration: 5000, // 5 seconds
+});
+```
+
+When a client drops, simply call `server.handleUnsubscribe(connectionId, topic)`. Waycast then checks if a `disposal: { schedule, cancel }` adapter was provided:
+- **In-Memory Tracking (Single Node)**: If no disposal adapter is provided, Waycast gracefully falls back to an internal, debounced `setTimeout`. This is perfect for single-instance deployments.
+- **Distributed Queues**: For horizontally scaled setups, implement the `disposal` adapter to push the timeout to a Redis/BullMQ delayed queue. When the delayed job runs, invoke `server.executeDispose(connectionId, topic)`.
+
+If the client reconnects within the threshold and resubscribes, the disposal is automatically cancelled!
 
 ---
 
@@ -452,7 +477,8 @@ Returned by `router.buildServer()`.
 | `.onDispose()` | `(name, handler)` → `this` | Register a cleanup handler called when client disconnects mid-RPC. Chainable. |
 | `.emit()` | `(name, params, data)` | Publish a typed message to a Pub/Sub topic |
 | `.handle()` | `(connectionId, message, middleware?)` | Route an incoming message. Call this from your transport listener. |
-| `.handleDispose()` | `(connId, topic)` | Trigger disposal for a dropped reply topic. Call on `leave-room` / disconnect. |
+| `.handleUnsubscribe()` | `(connId, topic)` | Trigger disposal for a dropped reply topic. Call on `leave-room` / disconnect. |
+| `.executeDispose()` | `(connId, topic)` | Executes a scheduled dispose handler from an external delayed queue. |
 | `.reply()` | `(name, requestId)` → `(type, data) => void` | Send an intermediate reply from outside the handler context |
 | `.replyResponse()` | `(name, requestId, data)` | Send the final response from outside the handler context |
 | `.replyError()` | `(name, requestId, error)` | Send an error from outside the handler context |
@@ -480,6 +506,7 @@ Returned by `router.buildClient()`.
 | `.onData()` | `(name, params, callback)` → `() => void` | Subscribe to a data topic. Returns an unsubscribe function. Auto-manages ref counts. |
 | `.handleData()` | `(message)` | Feed an incoming data message into Waycast. Call from your transport listener. |
 | `.handleReply()` | `(message)` | Feed an incoming reply message into Waycast. Call from your transport listener. |
+| `.handleDisconnect()` | `()` | Records disconnect time. Call on transport `disconnect`. |
 | `.resubscribe()` | `()` | Re-subscribe to all active topics. Useful after a reconnect. |
 | `.clear()` | `()` | Unsubscribe all topics and clear all listeners and pending RPC callbacks. |
 
@@ -495,7 +522,7 @@ Returned by `router.buildClient()`.
 | `RequestMessage<RpcRoutes>` | The wire format for an incoming RPC message (for typing your transport server) |
 | `DataMessage<DataRoutes>` | The wire format for an outgoing Pub/Sub message (for typing your transport server) |
 | `RpcReplyMessage<RpcRoutes>` | The wire format for an RPC reply message (for typing your transport server) |
-| `ServerAdapters<...>` | The adapter interface you implement to connect Waycast to your transport (includes `topic`, `emit`, `reply`, optional `errorFormatter`, and optional `logger`) |
+| `ServerAdapters<...>` | The adapter interface you implement to connect Waycast to your transport. Includes `topic`, `emit`, `reply`, `isClientConnected`, optional `disposal` scheduling, `errorFormatter`, and `logger`. |
 | `ClientAdapters<...>` | The adapter interface you implement on the client side (includes `send` and optional `logger`) |
 | `BuiltInRpcRoutes` | Type for the built-in `_waycast:subscribe` / `_waycast:unsubscribe` routes |
 | `RpcContext<...>` | The type of the `ctx` object passed to your RPC handler |

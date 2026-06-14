@@ -11,6 +11,8 @@ export type Prettify<in out T> = {
 	[K in keyof T]: T[K];
 } & {};
 
+export type MaybePromise<T> = T | Promise<T>;
+
 export type ExtractParamNames<T extends string> =
 	T extends `${string}[${infer P}]${infer Rest}`
 		? P | ExtractParamNames<Rest>
@@ -71,8 +73,20 @@ export interface ServerAdapters<
 	topic?: {
 		subscribe: (connectionId: string, ...topics: string[]) => void;
 		unsubscribe: (connectionId: string, ...topics: string[]) => void;
+		hasSubscriber?: (topic: string) => MaybePromise<boolean>;
 	};
+	isClientConnected?: (connectionId: string) => MaybePromise<boolean>;
+	disposal?: {
+		schedule: (
+			connectionId: string,
+			topic: string,
+			duration: number,
+		) => MaybePromise<void>;
+		cancel: (topic: string) => MaybePromise<void>;
+	};
+
 	emit: (topic: string, message: DataMessage<DataRoutes>) => void;
+
 	reply: (topic: string, message: RpcReplyMessage<RpcRoutes>) => void;
 	errorFormatter?: (error: unknown) => string;
 	logger?: AdapterLogger;
@@ -103,7 +117,7 @@ export type SendMessage<
 export interface ClientAdapters<
 	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
 > {
-	send: (message: SendMessage<RpcRoutes>) => void | Promise<void>;
+	send: (message: SendMessage<RpcRoutes>) => MaybePromise<void>;
 	logger?: AdapterLogger;
 }
 

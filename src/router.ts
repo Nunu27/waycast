@@ -25,6 +25,10 @@ export type BuiltInRpcRoutes = {
 	>;
 };
 
+export interface RouterOptions {
+	maxDisconnectionDuration?: number;
+}
+
 export class Router<
 	Meta,
 	DataRoutes extends Record<string, TSchema> = {},
@@ -45,6 +49,8 @@ export class Router<
 			meta: {},
 		},
 	};
+
+	constructor(public options: RouterOptions = {}) {}
 
 	data<Name extends string, Schema extends TSchema>(
 		name: Name,
@@ -87,6 +93,7 @@ export class Router<
 	): Router<Meta, DataRoutes & OtherData, RpcRoutes & OtherRpc> {
 		this._dataRoutes = { ...this._dataRoutes, ...other._dataRoutes };
 		this._rpcRoutes = { ...this._rpcRoutes, ...other._rpcRoutes };
+		this.options = { ...this.options, ...other.options };
 		return this as unknown as Router<
 			Meta,
 			DataRoutes & OtherData,

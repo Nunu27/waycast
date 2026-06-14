@@ -39,6 +39,13 @@ const server = appRouter.buildServer<Context>({
 				});
 			}
 		},
+		hasSubscriber: (topic) => {
+			const room = io.sockets.adapter.rooms.get(topic);
+			return room !== undefined && room.size > 0;
+		},
+	},
+	isClientConnected: (connectionId) => {
+		return io.sockets.sockets.has(connectionId);
 	},
 	emit: (topic, message) => {
 		io.to(topic).emit("data", message);
@@ -74,7 +81,7 @@ server
 
 // 4. Clean up lingering RPCs when sockets leave rooms (or disconnect)
 io.of("/").adapter.on("leave-room", (room, id) => {
-	if (room.endsWith("|reply")) server.handleDispose(id, room);
+	server.handleUnsubscribe(id, room);
 });
 
 io.on("connection", (socket) => {

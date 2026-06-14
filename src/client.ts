@@ -23,8 +23,10 @@ export class ClientApp<
 	private rpcCallbacks = new Map<string, RpcCallbacks<any>>();
 	private dataRouteRefCounts = new Map<string, number>();
 
+	private disconnectedAt?: number;
+
 	constructor(
-		_router: Router<any, DataRoutes, RpcRoutes>,
+		private router: Router<any, DataRoutes, RpcRoutes>,
 		private adapters: ClientAdapters<RpcRoutes & BuiltInRpcRoutes>,
 	) {}
 
@@ -77,10 +79,7 @@ export class ClientApp<
 			if (this.pendingSubscribes.size > 0) {
 				const topics = Array.from(this.pendingSubscribes);
 				this.pendingSubscribes.clear();
-				this.adapters.logger?.debug?.(
-					{ topics },
-					"Sending batched subscribe request",
-				);
+				this.adapters.logger?.debug?.({ topics }, "Sending subscribe request");
 				this.adapters.send({
 					requestId: crypto.randomUUID(),
 					name: "_waycast:subscribe",
@@ -94,7 +93,7 @@ export class ClientApp<
 				this.pendingUnsubscribes.clear();
 				this.adapters.logger?.debug?.(
 					{ topics },
-					"Sending batched unsubscribe request",
+					"Sending unsubscribe request",
 				);
 				this.adapters.send({
 					requestId: crypto.randomUUID(),
@@ -122,16 +121,34 @@ export class ClientApp<
 		this.scheduleFlush();
 	}
 
+	handleDisconnect() {
+		this.disconnectedAt = Date.now();
+	}
+
 	resubscribe() {
-		const activeTopics = [
-			...this.dataListeners.keys(),
-			...this.rpcCallbacks.keys(),
-		];
-		this.adapters.logger?.debug?.(
-			{ activeTopics },
-			"Triggering resubscription for active topics",
-		);
+		let disconnectedDuration = 0;
+		if (this.disconnectedAt) {
+			disconnectedDuration = Date.now() - this.disconnectedAt;
+			this.disconnectedAt = undefined;
+		}
+
+		const activeTopics = [...this.dataListeners.keys()];
+
+		const maxDuration = this.router.options.maxDisconnectionDuration;
+		if (maxDuration === undefined || disconnectedDuration <= maxDuration) {
+			activeTopics.push(...this.rpcCallbacks.keys());
+		} else {
+			for (const [topic, callbacks] of this.rpcCallbacks.entries()) {
+				callbacks.error?.("Connection lost for too long");
+				this.rpcCallbacks.delete(topic);
+			}
+		}
+
 		if (activeTopics.length > 0) {
+			this.adapters.logger?.debug?.(
+				{ activeTopics },
+				"Triggering resubscription for active topics",
+			);
 			this.subscribe(activeTopics);
 		}
 	}

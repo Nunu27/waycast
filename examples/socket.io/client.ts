@@ -42,6 +42,9 @@ socket.on("reply", (message) => {
 socket.on("connect", () => {
 	console.log("Connected to server!");
 
+	// Resubscribe to topics if this is a reconnection
+	client.resubscribe();
+
 	// 1. Subscribe to a data stream
 	// Waycast automatically dispatches the underlying subscribe RPC for you!
 	client.onData("system:alerts", undefined, (msg) => {
@@ -73,4 +76,8 @@ socket.on("connect", () => {
 			setTimeout(() => process.exit(0), 500); // Give it time to flush output
 		}, 1200);
 	}
+});
+socket.on("disconnect", () => {
+	console.log("Disconnected from server!");
+	client.handleDisconnect();
 });
