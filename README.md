@@ -102,9 +102,9 @@ Waycast introduces a clean three-layer architecture:
 ## Installation
 
 ```bash
-npm install waycast typebox
+npm install waycast @sinclair/typebox
 # or
-bun add waycast typebox
+bun add waycast @sinclair/typebox
 ```
 
 ---
@@ -565,7 +565,7 @@ Contributions, bug reports, and feature requests are welcome!
 **Setup:**
 
 ```bash
-git clone https://github.com/your-username/waycast.git
+git clone https://github.com/Nunu27/waycast.git
 cd waycast
 bun install
 ```
