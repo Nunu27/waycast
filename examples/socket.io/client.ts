@@ -47,17 +47,18 @@ socket.on("connect", () => {
 
 	// 1. Subscribe to a data stream
 	// Waycast automatically dispatches the underlying subscribe RPC for you!
-	client.onData("system:alerts", undefined, (msg) => {
-		console.log(`[Alert] ${msg}`);
+	client.onData("system:alerts", {
+		callback: (msg) => {
+			console.log(`[Alert] ${msg}`);
+		},
 	});
 
 	// 2. Perform a long-running RPC
 	console.log("Starting job...");
-	const _unsubscribe = client.rpc(
-		"job:[jobId]:process",
-		{ jobId: "backup" },
-		{ force: true },
-		{
+	const _unsubscribe = client.rpc("job:[jobId]:process", {
+		params: { jobId: "backup" },
+		payload: { force: true },
+		callbacks: {
 			log: (msg) => console.log(`[Log] ${msg}`),
 			progress: (p) => console.log(`[Progress] ${p.percent}%`),
 			response: (res) => {
@@ -66,7 +67,7 @@ socket.on("connect", () => {
 			},
 			error: (err) => console.error(`[Error]`, err),
 		},
-	);
+	});
 
 	// 3. Test disposing/aborting by disconnecting halfway!
 	if (process.argv.includes("--abort")) {

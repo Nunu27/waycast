@@ -102,5 +102,7 @@ io.on("connection", (socket) => {
 console.log("Socket.io server listening on port 3000");
 
 setInterval(() => {
-	server.emit("system:alerts", undefined, "Server is healthy!");
+	server.emit("system:alerts", {
+		data: "Server is healthy!",
+	});
 }, 2000);

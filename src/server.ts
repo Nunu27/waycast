@@ -13,6 +13,7 @@ import type {
 	RequestMessage,
 	RpcDef,
 	ServerAdapters,
+	WithParams,
 } from "./types";
 
 export type RpcContext<
@@ -302,9 +303,14 @@ export class ServerApp<
 
 	emit<Name extends Extract<keyof DataRoutes, string>>(
 		name: Name,
-		params: ParamsOf<Name>,
-		data: Static<DataRoutes[Name]>,
+		options: WithParams<
+			ParamsOf<Name>,
+			{
+				data: Static<DataRoutes[Name]>;
+			}
+		>,
 	) {
+		const { params, data } = options;
 		const topic = buildDataTopic(name, params);
 		this.adapters.logger?.debug?.(
 			{ name, params, topic, data },

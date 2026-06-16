@@ -1,4 +1,4 @@
-import type { Static, TSchema } from "@sinclair/typebox";
+import type { Static, TSchema, TVoid } from "@sinclair/typebox";
 
 import type { BaseLogger } from "pino";
 
@@ -22,17 +22,27 @@ export type ParamsOf<T extends string> = [ExtractParamNames<T>] extends [never]
 	? undefined
 	: Prettify<{ [K in ExtractParamNames<T>]: string }>;
 
+export type WithParams<P, T> = undefined extends P
+	? Prettify<{ params?: P } & T>
+	: Prettify<{ params: P } & T>;
+
 export interface RpcDef<
 	Payload extends TSchema,
-	Replies extends Record<string, TSchema>,
-	Response extends TSchema,
-	Meta,
+	Replies extends Record<string, TSchema> = {},
+	Response extends TSchema = TVoid,
+	Meta = any,
 > {
 	payload: Payload;
 	replies: Replies;
 	response: Response;
 	meta: Meta;
 }
+
+export type CheckMeta<M> = [keyof M] extends [never]
+	? { meta?: M }
+	: undefined extends M
+		? { meta?: M }
+		: { meta: M };
 
 export type DataMessage<DataRoutes extends Record<string, TSchema>> = {
 	[K in keyof DataRoutes & string]: {

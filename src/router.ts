@@ -8,7 +8,13 @@ import type {
 import { Type } from "@sinclair/typebox";
 import { ClientApp } from "./client";
 import { ServerApp } from "./server";
-import type { ClientAdapters, RpcDef, ServerAdapters } from "./types";
+import type {
+	CheckMeta,
+	ClientAdapters,
+	Prettify,
+	RpcDef,
+	ServerAdapters,
+} from "./types";
 
 export type BuiltInRpcRoutes = {
 	"_waycast:subscribe": RpcDef<
@@ -67,17 +73,28 @@ export class Router<
 	rpc<
 		Name extends string,
 		Payload extends TSchema,
-		Replies extends Record<string, TSchema>,
-		Response extends TSchema,
+		Replies extends Record<string, TSchema> = {},
+		Response extends TSchema = TVoid,
 	>(
 		name: Name,
-		def: { payload: Payload; replies: Replies; response: Response; meta: Meta },
+		def: Prettify<
+			{
+				payload: Payload;
+				replies?: Replies;
+				response?: Response;
+			} & CheckMeta<Meta>
+		>,
 	): Router<
 		Meta,
 		DataRoutes,
 		RpcRoutes & { [K in Name]: RpcDef<Payload, Replies, Response, Meta> }
 	> {
-		this._rpcRoutes[name] = def;
+		this._rpcRoutes[name] = {
+			payload: def.payload,
+			replies: def.replies ?? {},
+			response: def.response ?? Type.Void(),
+			meta: def.meta as Meta,
+		};
 		return this as unknown as Router<
 			Meta,
 			DataRoutes,

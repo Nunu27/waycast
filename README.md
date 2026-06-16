@@ -141,9 +141,8 @@ export const appRouter = new Router<Meta>()
   // A fire-and-forget RPC (no response sent)
   .rpc("metrics:ping", {
     payload: t.Object({ timestamp: t.Number() }),
-    replies: {},
-    response: t.Void(),
     meta: { requireAuth: false },
+    // replies and response are omitted, defaulting to {} and t.Void()
   });
 
 export type AppRouter = typeof appRouter;
@@ -248,7 +247,9 @@ io.on("connection", (socket) => {
 
 ```typescript
 // Type-safe: name, params, and data are all inferred from the schema
-server.emit("system:alerts", undefined, "System is going down for maintenance!");
+server.emit("system:alerts", {
+  data: "System is going down for maintenance!",
+});
 ```
 
 ---
@@ -288,22 +289,23 @@ socket.io.on("reconnect", () => client.resubscribe());
 socket.on("connect", () => {
   // Subscribe to a Pub/Sub topic. Automatically sends a subscribe message
   // and returns an unsubscribe function for cleanup.
-  const unsubscribe = client.onData("system:alerts", undefined, (msg) => {
-    console.log(`Alert: ${msg}`); // `msg` is typed as `string`
+  const unsubscribe = client.onData("system:alerts", {
+    callback: (msg) => {
+      console.log(`Alert: ${msg}`); // `msg` is typed as `string`
+    },
   });
 
   // Call an RPC with full type safety
-  const cancel = client.rpc(
-    "job:[jobId]:process",
-    { jobId: "backup-42" },       // params, typed as { jobId: string }
-    { force: true },              // payload, typed as { force: boolean }
-    {
+  const cancel = client.rpc("job:[jobId]:process", {
+    params: { jobId: "backup-42" },       // params, typed as { jobId: string }
+    payload: { force: true },             // payload, typed as { force: boolean }
+    callbacks: {
       log:      (msg) => console.log(msg),               // typed as string
       progress: (p)   => console.log(`${p.percent}%`),  // typed as { percent: number }
       response: (res) => console.log(`Done: ${res}`),   // typed as boolean
       error:    (err) => console.error(err),
-    }
-  );
+    },
+  });
 
   // `cancel()` cancels the local listener; `unsubscribe()` unsubscribes the data topic
 });
@@ -438,7 +440,10 @@ export function useWaycastData<T extends Extract<keyof DataRoutes, string>>(
 
   useEffect(() => {
     // Automatically subscribes on mount, unsubscribes on unmount
-    return client.onData(topic, params, (newData) => setData(newData));
+    return client.onData(topic, {
+      params,
+      callback: (newData) => setData(newData),
+    });
   }, [topic, JSON.stringify(params)]); // Stringify params to stabilize the dep
 
   return data;
@@ -475,7 +480,7 @@ Returned by `router.buildServer()`.
 |---|---|---|
 | `.on()` | `(name, handler)` → `this` | Register an RPC handler. Chainable. |
 | `.onDispose()` | `(name, handler)` → `this` | Register a cleanup handler called when client disconnects mid-RPC. Chainable. |
-| `.emit()` | `(name, params, data)` | Publish a typed message to a Pub/Sub topic |
+| `.emit()` | `(name, { params?, data })` | Publish a typed message to a Pub/Sub topic |
 | `.handle()` | `(connectionId, message, middleware?)` | Route an incoming message. Call this from your transport listener. |
 | `.handleUnsubscribe()` | `(connId, topic)` | Trigger disposal for a dropped reply topic. Call on `leave-room` / disconnect. |
 | `.executeDispose()` | `(connId, topic)` | Executes a scheduled dispose handler from an external delayed queue. |
@@ -502,8 +507,8 @@ Returned by `router.buildClient()`.
 
 | Method | Signature | Description |
 |---|---|---|
-| `.rpc()` | `(name, params, payload, callbacks)` → `() => void` | Call an RPC. Returns a cancel function. |
-| `.onData()` | `(name, params, callback)` → `() => void` | Subscribe to a data topic. Returns an unsubscribe function. Auto-manages ref counts. |
+| `.rpc()` | `(name, { params?, payload, callbacks })` → `() => void` | Call an RPC. Returns a cancel function. |
+| `.onData()` | `(name, { params?, callback })` → `() => void` | Subscribe to a data topic. Returns an unsubscribe function. Auto-manages ref counts. |
 | `.handleData()` | `(message)` | Feed an incoming data message into Waycast. Call from your transport listener. |
 | `.handleReply()` | `(message)` | Feed an incoming reply message into Waycast. Call from your transport listener. |
 | `.handleDisconnect()` | `()` | Records disconnect time. Call on transport `disconnect`. |

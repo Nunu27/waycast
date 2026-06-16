@@ -13,6 +13,7 @@ import type {
 	RpcDef,
 	RpcReplyMessage,
 	SendMessage,
+	WithParams,
 } from "./types";
 
 export class ClientApp<
@@ -32,10 +33,15 @@ export class ClientApp<
 
 	rpc<Name extends Extract<keyof RpcRoutes, string>>(
 		name: Name,
-		params: ParamsOf<Name>,
-		payload: Static<RpcRoutes[Name]["payload"]>,
-		callbacks: RpcCallbacks<RpcRoutes[Name]>,
+		options: WithParams<
+			ParamsOf<Name>,
+			{
+				payload: Static<RpcRoutes[Name]["payload"]>;
+				callbacks: RpcCallbacks<RpcRoutes[Name]>;
+			}
+		>,
 	): () => void {
+		const { params, payload, callbacks } = options;
 		const requestId = crypto.randomUUID();
 		const assignedReplyTopic = buildReplyTopic(name, requestId);
 
@@ -172,9 +178,14 @@ export class ClientApp<
 
 	onData<Name extends Extract<keyof DataRoutes, string>>(
 		name: Name,
-		params: ParamsOf<Name>,
-		callback: (data: Static<DataRoutes[Name]>) => void,
+		options: WithParams<
+			ParamsOf<Name>,
+			{
+				callback: (data: Static<DataRoutes[Name]>) => void;
+			}
+		>,
 	): () => void {
+		const { params, callback } = options;
 		const topic = buildDataTopic(name, params);
 		if (!this.dataListeners.has(topic)) {
 			this.dataListeners.set(topic, new Set());
