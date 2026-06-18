@@ -58,11 +58,11 @@ export class Router<
 
 	constructor(public options: RouterOptions = {}) {}
 
-	data<Name extends string, Schema extends TSchema>(
+	data<Name extends string, Schema extends TSchema = TVoid>(
 		name: Name,
-		schema: Schema,
+		schema?: Schema,
 	): Router<Meta, DataRoutes & { [K in Name]: Schema }, RpcRoutes> {
-		this._dataRoutes[name] = schema;
+		this._dataRoutes[name] = (schema ?? Type.Void()) as unknown as Schema;
 		return this as unknown as Router<
 			Meta,
 			DataRoutes & { [K in Name]: Schema },

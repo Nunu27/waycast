@@ -7,13 +7,13 @@ import {
 	type Router,
 } from "./router";
 import type {
+	EmitArgs,
 	MaybePromise,
 	ParamsOf,
 	Prettify,
 	RequestMessage,
 	RpcDef,
 	ServerAdapters,
-	WithParams,
 } from "./types";
 
 export type RpcContext<
@@ -303,13 +303,9 @@ export class ServerApp<
 
 	emit<Name extends Extract<keyof DataRoutes, string>>(
 		name: Name,
-		options: WithParams<
-			ParamsOf<Name>,
-			{
-				data: Static<DataRoutes[Name]>;
-			}
-		>,
+		...args: EmitArgs<ParamsOf<Name>, Static<DataRoutes[Name]>>
 	) {
+		const options = (args[0] || {}) as any;
 		const { params, data } = options;
 		const topic = buildDataTopic(name, params);
 		this.adapters.logger?.debug?.(

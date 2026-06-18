@@ -26,6 +26,13 @@ export type WithParams<P, T> = undefined extends P
 	? Prettify<{ params?: P } & T>
 	: Prettify<{ params: P } & T>;
 
+export type WithData<D> = undefined extends D ? { data?: D } : { data: D };
+
+export type EmitArgs<P, D> =
+	{} extends WithParams<P, WithData<D>>
+		? [options?: Prettify<WithParams<P, WithData<D>>>]
+		: [options: Prettify<WithParams<P, WithData<D>>>];
+
 export interface RpcDef<
 	Payload extends TSchema,
 	Replies extends Record<string, TSchema> = {},

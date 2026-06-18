@@ -13,6 +13,7 @@ export const appRouter = new Router<Meta>({
 	maxDisconnectionDuration: 5000,
 })
 	.data("system:alerts", t.String())
+	.data("system:ping") // no payload needed!
 	.rpc("job:[jobId]:process", {
 		payload: t.Object({ force: t.Boolean() }),
 		replies: {

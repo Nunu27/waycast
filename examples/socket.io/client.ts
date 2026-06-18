@@ -53,6 +53,13 @@ socket.on("connect", () => {
 		},
 	});
 
+	// You can also listen to topics that don't have payloads
+	client.onData("system:ping", {
+		callback: () => {
+			console.log(`[Ping] Received ping from server!`);
+		},
+	});
+
 	// 2. Perform a long-running RPC
 	console.log("Starting job...");
 	const _unsubscribe = client.rpc("job:[jobId]:process", {

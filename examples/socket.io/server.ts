@@ -105,4 +105,5 @@ setInterval(() => {
 	server.emit("system:alerts", {
 		data: "Server is healthy!",
 	});
+	server.emit("system:ping"); // Fully omittable options!
 }, 2000);

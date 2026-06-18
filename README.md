@@ -126,6 +126,8 @@ export interface Meta { requireAuth?: boolean; }
 export const appRouter = new Router<Meta>()
   // A typed Pub/Sub data stream
   .data("system:alerts", t.String())
+  // A data stream with no payload (omitted schema defaults to t.Void())
+  .data("system:ping")
 
   // An RPC with intermediate reply streams
   .rpc("job:[jobId]:process", {
@@ -250,6 +252,9 @@ io.on("connection", (socket) => {
 server.emit("system:alerts", {
   data: "System is going down for maintenance!",
 });
+
+// For topics with no parameters and no data (e.g. "system:ping"), omit the options entirely
+server.emit("system:ping");
 ```
 
 ---
@@ -464,7 +469,7 @@ The chainable schema builder. Shared between client and server.
 
 | Method | Signature | Description |
 |---|---|---|
-| `.data()` | `(name, schema)` | Register a typed Pub/Sub data topic |
+| `.data()` | `(name, schema?)` | Register a typed Pub/Sub data topic. Schema defaults to `Type.Void()`. |
 | `.rpc()` | `(name, { payload, replies, response, meta })` | Register a typed RPC route |
 | `.merge()` | `(otherRouter)` | Merge another router's routes into this one |
 | `.buildServer()` | `<Context>(adapters)` → `ServerApp` | Build a server adapter with the given transport hooks |
@@ -480,7 +485,7 @@ Returned by `router.buildServer()`.
 |---|---|---|
 | `.on()` | `(name, handler)` → `this` | Register an RPC handler. Chainable. |
 | `.onDispose()` | `(name, handler)` → `this` | Register a cleanup handler called when client disconnects mid-RPC. Chainable. |
-| `.emit()` | `(name, { params?, data })` | Publish a typed message to a Pub/Sub topic |
+| `.emit()` | `(name, { params?, data }?)` | Publish a typed message to a Pub/Sub topic |
 | `.handle()` | `(connectionId, message, middleware?)` | Route an incoming message. Call this from your transport listener. |
 | `.handleUnsubscribe()` | `(connId, topic)` | Trigger disposal for a dropped reply topic. Call on `leave-room` / disconnect. |
 | `.executeDispose()` | `(connId, topic)` | Executes a scheduled dispose handler from an external delayed queue. |
