@@ -147,23 +147,26 @@ const server = router.buildServer<Context>({
 ```ts
 server.on(
 	"users:get:[id]",
-	async ({ params, payload, context, connectionId, requestId, reply }) => {
+	async ({ params, payload, context, connectionId, requestId, reply, signal }) => {
 		reply("progress", "Loading..."); // custom intermediate reply from the `replies` config
 
-		const user = await db.getUser(params.id);
+		const user = await db.getUser(params.id, { signal }); // pass through to cancel the underlying work
 
 		return { name: user.name }; // sends "response" automatically
 		// throwing here sends "error" automatically
 	}
 );
 
-// Called when the client disconnects without cancelling, after maxDisconnectionDuration
+// Called whenever the request's lifecycle ends — success, explicit cancel, disconnect
+// timeout, or the client resubscribing on a different instance (see Scaling below)
 server.onDispose("users:get:[id]", (connectionId, requestId) => {
 	cancelExpensiveJob(requestId);
 });
 ```
 
 In a handler, `reply` only covers custom keys defined in the route's `replies` config. The `"response"` and `"error"` built-ins are handled implicitly — use `return` to send the response, `throw` to send an error.
+
+`signal` is an `AbortSignal` scoped to the request. It's created before the handler runs, so there's no race between disposal and the handler having set anything up — check `signal.aborted` or listen for `"abort"` to bail out early from long-running work. It always aborts before `onDispose` fires for the same request, so `onDispose` can rely on the handler having already stopped.
 
 ### Emitting data
 
@@ -345,6 +348,10 @@ function createBullMQDisposalScheduler(
 	};
 }
 ```
+
+### Cross-instance disposal
+
+If a client reconnects to a different instance (e.g. behind a non-sticky load balancer) and resubscribes to a still-pending RPC's reply topic, the new instance won't have that request locally — only the instance that originally received the `"rpc"` message does, since the handler itself is a live closure running there. In that case, the new instance broadcasts an abandonment over the adapter so the owning instance disposes immediately (aborting `signal` and firing `onDispose`) instead of waiting out the full `maxDisconnectionDuration`. This needs a real distributed adapter (Redis, NATS, ...); with the in-memory adapter both "instances" are the same process anyway.
 
 ## Examples
 
