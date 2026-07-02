@@ -6,7 +6,9 @@
 		"emitDeclarationOnly": true,
 		"outDir": "./dist",
 		"rootDir": "./src",
-		"allowImportingTsExtensions": false
+		"module": "ESNext",
+		"moduleResolution": "Bundler"
 	},
-	"include": ["src/**/*"]
+	"include": ["src/**/*"],
+	"exclude": ["src/__tests__/**/*"]
 }

@@ -1,372 +1,530 @@
-import type { Static, TSchema } from "@sinclair/typebox";
-import { type TypeCheck, TypeCompiler } from "@sinclair/typebox/compiler";
+import type { WaycastAdapter } from "./adapter.ts";
+import { createInMemoryAdapter } from "./adapter.ts";
+import type { Codec } from "./codec.ts";
+import { jsonCodec } from "./codec.ts";
 import {
-	type BuiltInRpcRoutes,
-	buildDataTopic,
-	buildReplyTopic,
-	type Router,
-} from "./router";
-import type {
-	EmitArgs,
-	MaybePromise,
-	ParamsOf,
-	Prettify,
-	RequestMessage,
-	RpcDef,
-	ServerAdapters,
-} from "./types";
+	ABANDON_TOPIC,
+	type AbandonMessage,
+	type ClientMessage,
+	computeRouterFingerprint,
+	isReplyTopic,
+	type ReplyEnvelope,
+	replyTopic,
+	type ServerMessage,
+} from "./protocol.ts";
+import { buildRouteName, type ParamsArg } from "./route-name.ts";
+import {
+	type AnyRoute,
+	type AnySchema,
+	type DataRoute,
+	type InferOutput,
+	type RouteParams,
+	RouteRegistry,
+	type RpcRoute,
+	type Waycast,
+} from "./router.ts";
+import type { WaycastDisposalScheduler } from "./scheduler.ts";
+import { createInMemoryDisposalScheduler } from "./scheduler.ts";
+import type { WaycastServerTransport } from "./transport.ts";
 
-export type RpcContext<
-	P,
-	Context,
-	Payload,
-	Replies extends Record<string, TSchema>,
-> = Prettify<{
+export type MiddlewareNext = <
+	Extra extends object = Record<string, never>,
+>(opts?: {
+	context: Extra;
+}) => Promise<unknown>;
+
+export interface MiddlewareParams<Context, Meta> {
+	type: "rpc" | "data";
+	name: string;
+	params: Record<string, string>;
+	meta: Meta | undefined;
+	context: Context;
+	connectionId: string;
+	next: MiddlewareNext;
+}
+
+export type Middleware<Context, Meta> = (
+	params: MiddlewareParams<Context, Meta>,
+) => Promise<unknown>;
+
+type RpcRouteNames<Routes> = {
+	[K in keyof Routes]: Routes[K] extends RpcRoute ? K : never;
+}[keyof Routes];
+type DataRouteNames<Routes> = {
+	[K in keyof Routes]: Routes[K] extends DataRoute ? K : never;
+}[keyof Routes];
+
+// Full reply surface — used by server.reply(); includes "error" and "response" built-ins
+export type ReplyFn<Route extends RpcRoute> = <
+	Key extends keyof Route["replies"] | "error" | "response",
+>(
+	key: Key & string,
+	value: Key extends "error"
+		? string
+		: Key extends "response"
+			? InferOutput<Route["response"]>
+			: InferOutput<Route["replies"][Key & keyof Route["replies"]]>,
+) => void;
+
+// Narrowed reply for handler context — custom replies only; "response" is the return value, "error" comes from throw
+export type HandlerReplyFn<Route extends RpcRoute> = <
+	Key extends keyof Route["replies"],
+>(
+	key: Key & string,
+	value: InferOutput<Route["replies"][Key & keyof Route["replies"]]>,
+) => void;
+
+export interface RpcHandlerArgs<Context, Route extends RpcRoute> {
+	params: RouteParams<Route["name"]>;
 	connectionId: string;
 	requestId: string;
-	params: P;
+	payload: InferOutput<Route["payload"]>;
 	context: Context;
-	payload: Payload;
-	reply: <K extends Extract<keyof Replies, string>>(
-		type: K,
-		data: Static<Replies[K]>,
-	) => void;
-}>;
+	reply: HandlerReplyFn<Route>;
+	signal: AbortSignal;
+}
 
-export const DEFER = "__waycast_defer__" as const;
+type MaybePromise<T> = Promise<T> | T;
 
-export type Handler<
-	P,
+export type RpcHandler<Context, Route extends RpcRoute> = (
+	args: RpcHandlerArgs<Context, Route>,
+) => undefined extends Route["response"]
+	? MaybePromise<void>
+	: MaybePromise<InferOutput<Route["response"]>>;
+
+export interface BuildServerOptions<Context, Meta> {
+	transport: WaycastServerTransport<Context>;
+	codec?: Codec;
+	adapter?: WaycastAdapter;
+	disposalScheduler?: WaycastDisposalScheduler;
+	logger?: Pick<Console, "log" | "warn" | "error">;
+	middlewares?: Middleware<Context, Meta>[];
+	errorFormatter?: (err: unknown) => string;
+	onHandshakeMismatch?: (connectionId: string) => void;
+}
+
+export interface WaycastServer<
 	Context,
-	Payload,
-	Response,
-	Replies extends Record<string, TSchema>,
-> = (
-	ctx: RpcContext<P, Context, Payload, Replies>,
-) => MaybePromise<Response | typeof DEFER>;
-
-export class ServerApp<
-	Context,
-	Meta,
-	DataRoutes extends Record<string, TSchema>,
-	RpcRoutes extends Record<string, RpcDef<any, any, any, Meta>>,
+	Routes extends Record<string, AnyRoute>,
 > {
-	public readonly defer = DEFER;
-	private handlers = new Map<string, Handler<any, any, any, any, any>>();
-	private disposeHandlers = new Map<
-		string,
-		(connectionId: string, requestId: string) => MaybePromise<void>
-	>();
-
-	private pendingDisposals = new Map<string, NodeJS.Timeout>();
-	private compiledPayloads = new Map<string, TypeCheck<any>>();
-
-	constructor(
-		private router: Router<Meta, DataRoutes, RpcRoutes>,
-		private adapters: ServerAdapters<DataRoutes, RpcRoutes & any>,
-	) {
-		for (const [name, route] of Object.entries(this.router._rpcRoutes)) {
-			try {
-				this.compiledPayloads.set(name, TypeCompiler.Compile(route.payload));
-			} catch (e) {
-				this.adapters.logger?.warn(
-					{ error: e },
-					`Failed to compile schema for route ${name}:`,
-				);
-			}
-		}
-
-		if (!this.adapters.disposal) {
-			this.adapters.disposal = {
-				schedule: (connectionId, topic, duration) => {
-					this.adapters.disposal?.cancel(topic);
-					this.pendingDisposals.set(
-						topic,
-						setTimeout(() => {
-							this.executeDispose(connectionId, topic);
-						}, duration),
-					);
-				},
-				cancel: (topic) => {
-					const existing = this.pendingDisposals.get(topic);
-					if (existing) {
-						clearTimeout(existing);
-						this.pendingDisposals.delete(topic);
-					}
-				},
-			};
-		}
-	}
-
-	on<Name extends Extract<keyof RpcRoutes, string>>(
+	on<Name extends RpcRouteNames<Routes>>(
 		name: Name,
-		handler: Handler<
-			ParamsOf<Name>,
-			Context,
-			Static<RpcRoutes[Name]["payload"]>,
-			Static<RpcRoutes[Name]["response"]>,
-			RpcRoutes[Name]["replies"]
-		>,
-	) {
-		if (this.handlers.has(name)) {
-			this.adapters.logger?.warn?.({ name }, "Overriding existing RPC handler");
-		}
-		this.handlers.set(name, handler as Handler<any, any, any, any, any>);
-		return this;
-	}
-
-	onDispose<Name extends Extract<keyof RpcRoutes, string>>(
+		handler: RpcHandler<Context, Extract<Routes[Name], RpcRoute>>,
+	): void;
+	onDispose<Name extends RpcRouteNames<Routes>>(
 		name: Name,
-		handler: (connectionId: string, requestId: string) => MaybePromise<void>,
-	) {
-		if (this.disposeHandlers.has(name)) {
-			this.adapters.logger?.warn?.(
-				{ name },
-				"Overriding existing dispose handler",
-			);
-		}
-		this.disposeHandlers.set(name, handler);
-		return this;
-	}
-
-	#isReplyTopic(topic: string) {
-		return topic.endsWith("|reply");
-	}
-
-	#getReplyInfo(topic: string) {
-		if (!this.#isReplyTopic(topic)) return;
-
-		const parts = topic.split("|");
-		if (parts.length < 3) return;
-
-		const requestId = parts[parts.length - 2];
-		if (!requestId) return;
-		const name = parts.slice(0, parts.length - 2).join("|");
-
-		return { name, requestId };
-	}
-
-	async handleUnsubscribe(connectionId: string, topic: string) {
-		const info = this.#getReplyInfo(topic);
-		if (!info) return;
-
-		const handler = this.disposeHandlers.get(info.name);
-		if (!handler) return;
-
-		this.adapters.logger?.debug?.(
-			{ connectionId, topic, ...info },
-			"Handling unsubscribe / cleanup for reply topic",
-		);
-
-		try {
-			const isConnected = await this.adapters.isClientConnected?.(connectionId);
-			const maxDuration = this.router.options.maxDisconnectionDuration;
-
-			if (isConnected === false && maxDuration !== undefined) {
-				this.adapters.disposal?.schedule(connectionId, topic, maxDuration);
-			} else {
-				await this.executeDispose(connectionId, topic);
-			}
-		} catch (error) {
-			this.adapters.logger?.error(
-				{ error },
-				`Error in onDispose handler for ${info.name}:`,
-			);
-		}
-	}
-
-	async executeDispose(connectionId: string, topic: string) {
-		const info = this.#getReplyInfo(topic);
-		if (!info) return;
-
-		const handler = this.disposeHandlers.get(info.name);
-		if (!handler) return;
-
-		this.adapters.logger?.debug?.(
-			{ topic, ...info },
-			"Executing dispose / cleanup for reply topic",
-		);
-		try {
-			await handler(connectionId, info.requestId);
-		} catch (error) {
-			this.adapters.logger?.error(
-				{ error },
-				`Error in delayed onDispose handler for ${info.name}:`,
-			);
-		}
-	}
-
-	async handle(
-		connectionId: string,
-		message: RequestMessage<RpcRoutes & BuiltInRpcRoutes>,
-		middleware?: (meta?: Meta) => MaybePromise<Context>,
-	) {
-		const { name, params, payload, requestId } = message;
-		const replyTopic = buildReplyTopic(name, requestId);
-
-		this.adapters.logger?.debug?.(
-			{ connectionId, name, requestId, params, payload },
-			"Received RPC request on server",
-		);
-
-		try {
-			const compiler = this.compiledPayloads.get(name);
-			if (compiler && !compiler.Check(payload)) {
-				const errors = [...compiler.Errors(payload)];
-				throw new Error(
-					`Invalid payload for ${name}: ${JSON.stringify(errors)}`,
-				);
-			}
-
-			if (name === "_waycast:subscribe" || name === "_waycast:unsubscribe") {
-				const topics = (payload as { topics?: string[] })?.topics;
-				if (!Array.isArray(topics)) return;
-
-				if (name === "_waycast:subscribe") {
-					this.adapters.topic?.subscribe(connectionId, ...topics);
-					for (const topic of topics) {
-						if (!this.#isReplyTopic(topic)) continue;
-						await this.adapters.disposal?.cancel(topic);
-					}
-				} else {
-					this.adapters.topic?.unsubscribe(connectionId, ...topics);
-				}
-
-				return;
-			}
-
-			this.adapters.topic?.subscribe(connectionId, replyTopic);
-
-			const handler = this.handlers.get(name);
-			if (!handler) {
-				throw new Error(`No handler found for RPC route: ${name}`);
-			}
-
-			const rpcDef = this.router._getRpcRoute(name);
-			let context: Context;
-
-			if (middleware) {
-				context = await middleware(rpcDef.meta);
-			} else {
-				context = {} as Context;
-			}
-
-			const ctx: RpcContext<any, any, any, any> = {
-				connectionId,
-				requestId,
-				params,
-				context,
-				payload,
-				reply: (type, data) => {
-					this.adapters.logger?.debug?.(
-						{ connectionId, name, requestId, replyTopic, type, data },
-						"Sending RPC intermediate reply",
-					);
-					this.adapters.reply(replyTopic, {
-						name,
-						requestId,
-						reply: { type, data },
-					});
-				},
-			};
-
-			const response = await handler(ctx);
-			this.adapters.logger?.debug?.(
-				{ connectionId, name, requestId, responseDeferred: response === DEFER },
-				"RPC route handler completed",
-			);
-			if (response !== DEFER) {
-				this.adapters.reply(replyTopic, {
-					name,
-					requestId,
-					reply: { type: "response", data: response },
-				});
-			}
-		} catch (error) {
-			this.adapters.logger?.error(
-				{ error },
-				`Error handling RPC route ${name}:`,
-			);
-			this.adapters.topic?.unsubscribe(connectionId, replyTopic);
-			this.adapters.reply(replyTopic, {
-				name,
-				requestId,
-				reply: {
-					type: "error",
-					data:
-						this.adapters.errorFormatter?.(error) ??
-						(error instanceof Error ? error.message : String(error)),
-				},
-			});
-		}
-	}
-
-	emit<Name extends Extract<keyof DataRoutes, string>>(
-		name: Name,
-		...args: EmitArgs<ParamsOf<Name>, Static<DataRoutes[Name]>>
-	) {
-		const options = (args[0] || {}) as any;
-		const { params, data } = options;
-		const topic = buildDataTopic(name, params);
-		this.adapters.logger?.debug?.(
-			{ name, params, topic, data },
-			"Emitting data event",
-		);
-		this.adapters.emit(topic, { name, topic, data });
-	}
-
-	reply<Name extends Extract<keyof RpcRoutes, string>>(
+		handler: (connectionId: string, requestId: string) => void,
+	): void;
+	reply<Name extends RpcRouteNames<Routes>>(
 		name: Name,
 		requestId: string,
-	) {
-		return <K extends Extract<keyof RpcRoutes[Name]["replies"], string>>(
-			type: K,
-			data: Static<RpcRoutes[Name]["replies"][K]>,
-		) => {
-			const replyTopic = buildReplyTopic(name, requestId);
-			this.adapters.logger?.debug?.(
-				{ name, requestId, replyTopic, type, data },
-				"Sending RPC intermediate reply (standalone)",
-			);
-			this.adapters.reply(replyTopic, {
-				name,
-				requestId,
-				reply: { type, data },
-			});
+	): ReplyFn<Extract<Routes[Name], RpcRoute>>;
+	emit<Name extends DataRouteNames<Routes>>(
+		name: Name,
+		args: ParamsArg<Name & string> & {
+			data: InferOutput<Extract<Routes[Name], DataRoute>["schema"]>;
+		},
+	): void;
+	stop(): Promise<void>;
+}
+
+function defaultErrorFormatter(err: unknown): string {
+	if (err instanceof Error) return err.message;
+	try {
+		return JSON.stringify(err);
+	} catch {
+		return String(err);
+	}
+}
+
+async function validatePayload(
+	schema: AnySchema | undefined,
+	value: unknown,
+): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+	if (!schema) return { ok: true, value };
+	const result = await schema["~standard"].validate(value);
+	if (result.issues) {
+		return {
+			ok: false,
+			error: result.issues.map((issue) => issue.message).join("; "),
+		};
+	}
+	return { ok: true, value: result.value };
+}
+
+async function runMiddlewares<Context, Meta>(
+	middlewares: Middleware<Context, Meta>[],
+	base: Omit<MiddlewareParams<Context, Meta>, "next" | "context">,
+	context: Context,
+	final: (context: Context) => Promise<unknown>,
+): Promise<unknown> {
+	let cursor = -1;
+
+	async function dispatch(index: number, ctx: Context): Promise<unknown> {
+		if (index <= cursor) throw new Error("next() called multiple times");
+		cursor = index;
+
+		if (index === middlewares.length) return final(ctx);
+
+		const middleware = middlewares[index] as Middleware<Context, Meta>;
+		let nextCalled = false;
+		const next: MiddlewareNext = async (opts) => {
+			nextCalled = true;
+			const merged = opts?.context
+				? (Object.assign({}, ctx, opts.context) as Context)
+				: ctx;
+			return dispatch(index + 1, merged);
+		};
+
+		const result = await middleware({ ...base, context: ctx, next });
+		if (!nextCalled) throw new Error("middleware short-circuited the request");
+		return result;
+	}
+
+	return dispatch(0, context);
+}
+
+interface RpcRequestState {
+	name: string;
+	requestId: string;
+	connectionId: string;
+	topic: string;
+	controller: AbortController;
+}
+
+export function buildServer<
+	Context,
+	Meta,
+	Routes extends Record<string, AnyRoute>,
+>(
+	router: Waycast<Meta, Routes>,
+	options: BuildServerOptions<Context, Meta>,
+): WaycastServer<Context, Routes> {
+	const transport = options.transport;
+	const codec = options.codec ?? jsonCodec;
+	const adapter = options.adapter ?? createInMemoryAdapter();
+	const disposalScheduler =
+		options.disposalScheduler ?? createInMemoryDisposalScheduler();
+	const logger = options.logger;
+	const middlewares = options.middlewares ?? [];
+	const errorFormatter = options.errorFormatter ?? defaultErrorFormatter;
+	const onHandshakeMismatch =
+		options.onHandshakeMismatch ??
+		((connectionId) => transport.disconnect(connectionId));
+
+	const registry = new RouteRegistry(router._routes);
+	const fingerprint = computeRouterFingerprint(router._routes);
+
+	// biome-ignore lint/suspicious/noExplicitAny: type-erased storage; concrete route type is checked at .on() call site
+	const rpcHandlers = new Map<string, RpcHandler<Context, any>>();
+	const disposeHandlers = new Map<
+		string,
+		(connectionId: string, requestId: string) => void
+	>();
+
+	const connectionContexts = new Map<string, Context>();
+	const connectionTopics = new Map<string, Set<string>>();
+	const localTopicMembers = new Map<string, Set<string>>();
+	const rpcRequests = new Map<string, RpcRequestState>();
+
+	function trackLocal(connectionId: string, topic: string) {
+		let members = localTopicMembers.get(topic);
+		if (!members) {
+			members = new Set();
+			localTopicMembers.set(topic, members);
+		}
+		members.add(connectionId);
+
+		let topics = connectionTopics.get(connectionId);
+		if (!topics) {
+			topics = new Set();
+			connectionTopics.set(connectionId, topics);
+		}
+		topics.add(topic);
+	}
+
+	function untrackLocal(connectionId: string, topic: string) {
+		const members = localTopicMembers.get(topic);
+		if (members) {
+			members.delete(connectionId);
+			if (members.size === 0) localTopicMembers.delete(topic);
+		}
+		connectionTopics.get(connectionId)?.delete(topic);
+	}
+
+	async function subscribe(connectionId: string, topic: string) {
+		trackLocal(connectionId, topic);
+		await adapter.subscribe(connectionId, topic);
+	}
+
+	async function unsubscribe(connectionId: string, topic: string) {
+		untrackLocal(connectionId, topic);
+		await adapter.unsubscribe(connectionId, topic);
+	}
+
+	adapter.onMessage((topic, raw) => {
+		if (topic === ABANDON_TOPIC) {
+			const { topic: abandoned } = codec.decode(raw) as AbandonMessage;
+			disposeRequest(abandoned);
+			return;
+		}
+		const members = localTopicMembers.get(topic);
+		if (!members) return;
+		for (const connectionId of members) transport.send(connectionId, raw);
+	});
+
+	function disposeRequest(topic: string) {
+		const state = rpcRequests.get(topic);
+		if (!state) return; // idempotent — already disposed via another trigger
+		rpcRequests.delete(topic);
+		state.controller.abort();
+		void disposalScheduler.cancel(topic);
+		disposeHandlers.get(state.name)?.(state.connectionId, state.requestId);
+	}
+
+	disposalScheduler.onDue((topic) => disposeRequest(topic));
+
+	function publish(topic: string, payload: unknown) {
+		const message: ServerMessage = { type: "publish", topic, payload };
+		void adapter.publish(topic, codec.encode(message));
+	}
+
+	// biome-ignore lint/suspicious/noExplicitAny: type-erased helper; callers hold the concrete ReplyFn type
+	function makeReply(topic: string): ReplyFn<any> {
+		return (key, value) => {
+			const envelope: ReplyEnvelope = { key, value };
+			publish(topic, envelope);
 		};
 	}
 
-	replyResponse<Name extends Extract<keyof RpcRoutes, string>>(
-		name: Name,
-		requestId: string,
-		data: Static<RpcRoutes[Name]["response"]>,
+	async function handleRpc(
+		connectionId: string,
+		context: Context,
+		message: Extract<ClientMessage, { type: "rpc" }>,
 	) {
-		const replyTopic = buildReplyTopic(name, requestId);
-		this.adapters.logger?.debug?.(
-			{ name, requestId, replyTopic, data },
-			"Sending RPC final response reply (standalone)",
-		);
-		this.adapters.reply(replyTopic, {
-			name,
-			requestId,
-			reply: { type: "response", data },
+		const topic = replyTopic(message.name, message.requestId);
+		await subscribe(connectionId, topic);
+		const controller = new AbortController();
+		rpcRequests.set(topic, {
+			name: message.name,
+			requestId: message.requestId,
+			connectionId,
+			topic,
+			controller,
 		});
+
+		const reply = makeReply(topic);
+
+		async function fail(error: string) {
+			reply("error", error);
+			await unsubscribe(connectionId, topic);
+			disposeRequest(topic);
+		}
+
+		// message.name is the literal route template (e.g. "greet:[name]"), not a substituted
+		// string — params arrive separately in message.params, so this is an exact map lookup,
+		// not the regex-based registry.resolve() used for concrete topic strings
+		const route = router._routes.get(message.name);
+		if (route?.kind !== "rpc") {
+			await fail(`Unknown rpc route "${message.name}"`);
+			return;
+		}
+
+		const handler = rpcHandlers.get(message.name);
+		if (!handler) {
+			await fail(`No handler registered for rpc route "${message.name}"`);
+			return;
+		}
+
+		const validated = await validatePayload(route.payload, message.payload);
+		if (!validated.ok) {
+			await fail(validated.error);
+			return;
+		}
+
+		try {
+			const result = await runMiddlewares(
+				middlewares,
+				{
+					type: "rpc",
+					name: message.name,
+					params: message.params,
+					meta: route.meta as Meta | undefined,
+					connectionId,
+				},
+				context,
+				async (ctx) =>
+					handler({
+						params: message.params,
+						connectionId,
+						requestId: message.requestId,
+						payload: validated.value,
+						context: ctx,
+						reply,
+						signal: controller.signal,
+					}),
+			);
+			if (result !== undefined) reply("response", result);
+		} catch (err) {
+			logger?.error?.(err);
+			await fail(errorFormatter(err));
+		}
 	}
 
-	replyError<Name extends Extract<keyof RpcRoutes, string>>(
-		name: Name,
-		requestId: string,
-		error: string,
+	async function handleSubscribe(
+		connectionId: string,
+		context: Context,
+		topics: string[],
 	) {
-		const replyTopic = buildReplyTopic(name, requestId);
-		this.adapters.logger?.debug?.(
-			{ name, requestId, replyTopic, error },
-			"Sending RPC error reply (standalone)",
-		);
-		this.adapters.reply(replyTopic, {
-			name,
-			requestId,
-			reply: { type: "error", data: error },
-		});
+		for (const topic of topics) {
+			const pending = rpcRequests.get(topic);
+			if (pending) {
+				pending.connectionId = connectionId;
+				await subscribe(connectionId, topic);
+				await disposalScheduler.cancel(topic);
+				continue;
+			}
+
+			const resolved = registry.resolve(topic);
+			if (resolved?.def.kind !== "data") {
+				// this instance doesn't own the pending rpc for this reply topic — broadcast in
+				// case another instance does, so it can dispose now instead of waiting out its
+				// disconnect grace period
+				if (isReplyTopic(topic)) {
+					void adapter.publish(
+						ABANDON_TOPIC,
+						codec.encode({ topic } satisfies AbandonMessage),
+					);
+				}
+				send(connectionId, {
+					type: "subscribe-rejected",
+					topic,
+					reason: `Unknown topic "${topic}"`,
+				});
+				continue;
+			}
+
+			try {
+				await runMiddlewares(
+					middlewares,
+					{
+						type: "data",
+						name: resolved.def.name,
+						params: resolved.params,
+						meta: resolved.def.meta as Meta | undefined,
+						connectionId,
+					},
+					context,
+					async () => {
+						await subscribe(connectionId, topic);
+					},
+				);
+			} catch (err) {
+				send(connectionId, {
+					type: "subscribe-rejected",
+					topic,
+					reason: errorFormatter(err),
+				});
+			}
+		}
 	}
+
+	async function handleUnsubscribe(connectionId: string, topics: string[]) {
+		for (const topic of topics) {
+			await unsubscribe(connectionId, topic);
+			disposeRequest(topic);
+		}
+	}
+
+	function send(connectionId: string, message: ServerMessage) {
+		transport.send(connectionId, codec.encode(message));
+	}
+
+	transport.start({
+		onConnection(connectionId, context) {
+			connectionContexts.set(connectionId, context);
+		},
+		async onMessage(connectionId, raw) {
+			if (!connectionContexts.has(connectionId)) return;
+			const context = connectionContexts.get(connectionId) as Context;
+
+			let message: ClientMessage;
+			try {
+				message = codec.decode(raw) as ClientMessage;
+			} catch (err) {
+				logger?.error?.(err);
+				return;
+			}
+
+			switch (message.type) {
+				case "handshake": {
+					if (message.fingerprint !== fingerprint) {
+						send(connectionId, { type: "handshake", ok: false });
+						onHandshakeMismatch(connectionId);
+						return;
+					}
+					send(connectionId, { type: "handshake", ok: true });
+					return;
+				}
+				case "subscribe":
+					await handleSubscribe(connectionId, context, message.topics);
+					return;
+				case "unsubscribe":
+					await handleUnsubscribe(connectionId, message.topics);
+					return;
+				case "rpc":
+					await handleRpc(connectionId, context, message);
+					return;
+			}
+		},
+		async onDisconnection(connectionId) {
+			const topics = connectionTopics.get(connectionId);
+			connectionContexts.delete(connectionId);
+			if (!topics) return;
+
+			for (const topic of [...topics]) {
+				untrackLocal(connectionId, topic);
+				await adapter.unsubscribe(connectionId, topic);
+
+				const pending = rpcRequests.get(topic);
+				if (pending)
+					await disposalScheduler.schedule(
+						topic,
+						router.options.maxDisconnectionDuration,
+					);
+			}
+			connectionTopics.delete(connectionId);
+		},
+	});
+
+	return {
+		on(name, handler) {
+			const key = name as string;
+			if (rpcHandlers.has(key))
+				throw new Error(`Handler for rpc route "${key}" is already registered`);
+			// biome-ignore lint/suspicious/noExplicitAny: downcasting to type-erased storage type
+			rpcHandlers.set(key, handler as RpcHandler<Context, any>);
+		},
+		onDispose(name, handler) {
+			const key = name as string;
+			if (disposeHandlers.has(key))
+				throw new Error(
+					`Dispose handler for rpc route "${key}" is already registered`,
+				);
+			disposeHandlers.set(key, handler);
+		},
+		reply(name, requestId) {
+			return makeReply(replyTopic(name as string, requestId));
+		},
+		emit(name, args) {
+			const topic = buildRouteName(
+				name as string,
+				(args.params ?? {}) as Record<string, string>,
+			);
+			publish(topic, args.data);
+		},
+		async stop() {
+			await transport.stop();
+		},
+	};
 }

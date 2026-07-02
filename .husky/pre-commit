@@ -1,10 +1,1 @@
-set -e
-
-echo "Checking TypeScript..."
-bunx tsc --noEmit
-
-echo "Running Biome (Format & Fix)..."
-bunx biome check --write --unsafe .
-
-echo "Staging fixed files..."
-git add .
+bunx lint-staged

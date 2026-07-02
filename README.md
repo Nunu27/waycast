@@ -1,606 +1,536 @@
-<h1 align="center">Waycast</h1>
+# waycast
 
-<p align="center">
-  <strong>Transport-agnostic, end-to-end typed RPC &amp; Pub/Sub for TypeScript.</strong><br/>
-  Bring your own network layer. Waycast handles the typing, validation, and routing.
-</p>
+[![npm version](https://img.shields.io/npm/v/waycast)](https://www.npmjs.com/package/waycast)
+[![npm downloads](https://img.shields.io/npm/dm/waycast)](https://www.npmjs.com/package/waycast)
+[![license](https://img.shields.io/npm/l/waycast)](./LICENSE)
+[![typescript](https://img.shields.io/badge/TypeScript-5%2B-3178c6)](https://www.typescriptlang.org)
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/waycast"><img src="https://img.shields.io/npm/v/waycast?style=flat-square&color=6366f1" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/waycast"><img src="https://img.shields.io/npm/dm/waycast?style=flat-square&color=6366f1" alt="npm downloads" /></a>
-  <img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" alt="MIT License" />
-</p>
+Transport-agnostic RPC and Pub/Sub library for TypeScript with end-to-end type safety and support for intermediate replies.
 
----
-
-Waycast is a **transport-agnostic**, end-to-end typed RPC and Pub/Sub framework for TypeScript. Built on top of [TypeBox](https://github.com/sinclairzx81/typebox), it provides rigorous runtime schema validation, aggressive type inference, and native support for **intermediate RPC streams** (progress updates, logs, etc.) before a final response — with zero lock-in to any particular network technology.
-
-## Table of Contents
-
-- [Features](#features)
-- [How It Works](#how-it-works)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-  - [1. Define your Router](#1-define-your-router)
-  - [2. Setup the Server](#2-setup-the-server)
-  - [3. Setup the Client](#3-setup-the-client)
-- [Router Composition & Merging](#router-composition--merging)
-- [Disconnected RPC Replies](#disconnected-rpc-replies)
-- [Utility Types (Custom Hooks)](#utility-types-custom-hooks)
-- [API Reference](#api-reference)
-- [Comparison](#comparison)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
-## Features
-
-| Feature | Description |
-|---|---|
-| 🔌 **Transport Agnostic** | Works with Socket.io, native WebSockets, WebRTC, cross-window messaging, or anything else |
-| 🔒 **Strictly Typed** | End-to-end type inference from schema → server handler → client call |
-| ✅ **Auto-Validated** | Payloads are compiled and validated via TypeBox before reaching your handler |
-| 📡 **Intermediate Replies** | Stream progress updates, logs, or partial results during a single RPC call |
-| 🔗 **Disconnected RPCs** | Resolve, push, or reject an RPC from anywhere outside the handler context |
-| 📬 **Pub/Sub Routing** | First-class support for typed data topics with automatic subscribe/unsubscribe |
-| 🧹 **Lifecycle Hooks** | `onDispose` lets you clean up resources when a client drops mid-RPC |
-| 🔇 **Fire-and-Forget** | Mark an RPC with `Type.Void()` to skip sending any response over the wire |
-| 🧩 **Composable** | Split large routers into domain modules and merge them with full type inference |
-
----
-
-## How It Works
-
-Waycast introduces a clean three-layer architecture:
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                          Router (Schema)                           │
-│     Shared between client & server. Defines all RPC routes and     │
-│               Pub/Sub topics using TypeBox schemas.                │
-└─────────────────────────────────┬──────────────────────────────────┘
-                                  │
-          ┌── buildServer() ──────┴────── buildClient() ──┐
-          ▼                                               ▼
-┌──────────────────────────┐                    ┌──────────────────────────┐
-│        ServerApp         │                    │        ClientApp         │
-├──────────────────────────┤                    ├──────────────────────────┤
-│ [RPC]                    │                    │ [RPC]                    │
-│  .on(route, handler)     │                    │  .rpc(route) => dispose  │
-│                          │                    │                          │
-│ [Pub/Sub]                │                    │ [Pub/Sub]                │
-│  .emit(topic, data)      │                    │  .onData(topic)=> dispose│
-│                          │                    │                          │
-│ [Incoming]               │                    │ [Incoming]               │
-│  .handle(connId, msg)    │                    │  .handleData(msg)        │
-└─────────┬────────────────┘                    └────────────────┬─────────┘
-          │                                                      │
-          ▼                                                      ▼
-┌──────────────────────────┐                    ┌──────────────────────────┐
-│      Server Adapter      │                    │      Client Adapter      │
-├──────────────────────────┤                    ├──────────────────────────┤
-│ - ACK System             │◄─── (Req ID) ─────►│ .send(msg) => string (ID)│
-│ - Reply/Error Callbacks  │                    │ .subscribe([topics])     │
-│                          │                    │ .unsubscribe([topics])   │
-└─────────┬────────────────┘                    └────────────────┬─────────┘
-          │                                                      │
-          └─────────────────────────┬────────────────────────────┘
-                                    ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                          Transport Layer                           │
-│               (Socket.io, WebSocket, WebRTC, etc.)                 │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-1. **You define** your RPC routes and Pub/Sub topics once in a shared `Router`.
-2. **You provide** thin adapter functions that tell Waycast how to send/receive messages over your chosen transport.
-3. **Waycast handles** schema compilation, payload validation, routing, and reply tracking automatically.
-
----
+Works with any transport — WebSocket, Socket.io, gRPC, or anything else — by implementing a small `WaycastServerTransport` / `WaycastClientTransport` interface.
 
 ## Installation
 
 ```bash
-npm install waycast @sinclair/typebox
+npm install waycast
 # or
-bun add waycast @sinclair/typebox
+bun add waycast
 ```
-
----
 
 ## Quick Start
 
-### 1. Define your Router
+```ts
+import Waycast from "waycast";
+import { z } from "zod"; // any Standard Schema validator works
 
-Define your shared schema using TypeBox. This file is typically shared between your client and server (e.g. in a monorepo package or a `shared/` directory).
+// 1. Define your router (shared between server and client)
+const router = new Waycast()
+	.rpc("greet", {
+		payload: z.object({ name: z.string() }),
+		response: z.string()
+	})
+	.data("messages:[roomId]", z.string());
 
-```typescript
-// router.ts
-import { Type as t } from "@sinclair/typebox";
-import { Router } from "waycast";
+// 2. Build the server
+const server = router.buildServer<{ userId: string }>({
+	transport: myServerTransport
+});
 
-export interface Context { userId?: string; }
-export interface Meta { requireAuth?: boolean; }
+server.on("greet", async ({ payload, reply }) => {
+	reply("response", `Hello, ${payload.name}!`);
+});
 
-export const appRouter = new Router<Meta>()
-  // A typed Pub/Sub data stream
-  .data("system:alerts", t.String())
-  // A data stream with no payload (omitted schema defaults to t.Void())
-  .data("system:ping")
+server.emit("messages:[roomId]", {
+	params: { roomId: "general" },
+	data: "Hello everyone!"
+});
 
-  // An RPC with intermediate reply streams
-  .rpc("job:[jobId]:process", {
-    payload: t.Object({ force: t.Boolean() }),
-    replies: {
-      progress: t.Object({ percent: t.Number() }),
-      log: t.String(),
-    },
-    response: t.Boolean(),
-    meta: { requireAuth: true },
-  })
+// 3. Build the client
+const client = router.buildClient({ transport: myClientTransport });
 
-  // A fire-and-forget RPC (no response sent)
-  .rpc("metrics:ping", {
-    payload: t.Object({ timestamp: t.Number() }),
-    meta: { requireAuth: false },
-    // replies and response are omitted, defaulting to {} and t.Void()
-  });
+const cancel = client.rpc("greet", {
+	params: {},
+	payload: { name: "world" },
+	callbacks: {
+		response: (msg) => console.log(msg), // "Hello, world!"
+		error: (err) => console.error(err)
+	}
+});
 
-export type AppRouter = typeof appRouter;
-```
-
-**Topic Parameters**: Use `[paramName]` in route/topic strings to define dynamic segments. Waycast automatically extracts them as typed parameters:
-
-```
-"job:[jobId]:process"  →  params: { jobId: string }
-"user:[userId]:status" →  params: { userId: string }
-```
-
----
-
-### 2. Setup the Server
-
-Here is a complete example using [Socket.io](https://socket.io/). The pattern is the same for any other transport.
-
-**Step 1 — Strictly type your Socket.io server:**
-
-```typescript
-import { Server } from "socket.io";
-import type {
-  RequestMessage,
-  DataMessage,
-  RpcReplyMessage,
-  InferDataRoutes,
-  InferRpcRoutes,
-  BuiltInRpcRoutes,
-} from "waycast";
-import { type AppRouter } from "./router";
-
-type MyDataRoutes = InferDataRoutes<AppRouter>;
-type MyRpcRoutes  = InferRpcRoutes<AppRouter> & BuiltInRpcRoutes;
-
-const io = new Server<
-  { rpc: (message: RequestMessage<MyRpcRoutes>) => void },
-  { data: (message: DataMessage<MyDataRoutes>) => void; reply: (message: RpcReplyMessage<MyRpcRoutes>) => void }
->(3000);
-```
-
-**Step 2 — Build the Waycast server adapter:**
-
-Tell Waycast how to subscribe/unsubscribe connections and how to transmit messages over your transport layer.
-
-```typescript
-const server = appRouter.buildServer<Context>({
-  topic: {
-    subscribe:   (connId, ...topics) => io.sockets.sockets.get(connId)?.join(topics),
-    unsubscribe: (connId, ...topics) => topics.forEach(t => io.sockets.sockets.get(connId)?.leave(t)),
-    hasSubscriber: (topic) => (io.sockets.adapter.rooms.get(topic)?.size ?? 0) > 0,
-  },
-  isClientConnected: (connId) => io.sockets.sockets.has(connId),
-  emit:  (topic, message) => io.to(topic).emit("data", message),
-  reply: (topic, message) => io.to(topic).emit("reply", message),
-  // Optional: Custom error formatting for client replies
-  errorFormatter: (err) => err instanceof Error ? err.message : String(err),
-  // Optional: Logger adapter (e.g. console, pino, etc.)
-  logger: console,
+const unsub = client.onData("messages:[roomId]", {
+	params: { roomId: "general" },
+	callback: (msg) => console.log(msg)
 });
 ```
 
-**Step 3 — Register RPC handlers:**
+## Router
 
-```typescript
-server
-  .on("job:[jobId]:process", async (ctx) => {
-    const { jobId } = ctx.params;   // Fully typed: { jobId: string }
-    const { force } = ctx.payload;  // Fully typed: { force: boolean }
+The router is the shared contract between server and client. Define it once and use it in both.
 
-    ctx.reply("log", `Starting job ${jobId}`);
-    ctx.reply("progress", { percent: 50 });
-    // ...
-    return true; // Final response automatically sent to the client
-  })
-  .onDispose("job:[jobId]:process", (connectionId, requestId) => {
-    // Called automatically when the client disconnects mid-RPC
-    console.log(`Cleaning up request ${requestId} for connection ${connectionId}`);
-  });
+```ts
+import Waycast from "waycast";
+
+type Meta = { roles?: string[] };
+
+const router = new Waycast<Meta>({ maxDisconnectionDuration: 5000 })
+	.rpc("users:get:[id]", {
+		payload: z.object({ includeProfile: z.boolean() }),
+		response: z.object({ name: z.string() }),
+		replies: {
+			progress: z.string() // intermediate reply before the final response
+		},
+		meta: { roles: ["admin"] } // typed against Meta, available in middlewares
+	})
+	.data("chat:[roomId]", z.string(), { roles: ["member"] });
 ```
 
-**Step 4 — Hook up the socket:**
+**`new Waycast<Meta>(options?)`**
 
-```typescript
-// Clean up lingering RPCs when a socket leaves a room
-io.of("/").adapter.on("leave-room", (room, id) => {
-  server.handleUnsubscribe(id, room);
+| Option                     | Default | Description                                                   |
+| -------------------------- | ------- | ------------------------------------------------------------- |
+| `maxDisconnectionDuration` | `5000`  | Ms to wait before disposing an RPC after a client disconnects |
+
+**`.rpc(name, config?)`** — registers an RPC route. All config fields are optional.
+
+| Field      | Description                                                      |
+| ---------- | ---------------------------------------------------------------- |
+| `payload`  | Standard Schema for the incoming payload                         |
+| `response` | Standard Schema for the return value                             |
+| `replies`  | Map of named intermediate replies, each with its own schema      |
+| `meta`     | Arbitrary metadata attached to this route (typed against `Meta`) |
+
+**`.data(name, schema?, meta?)`** — registers a pub/sub data route. Both `schema` and `meta` are optional.
+
+**`.merge(other)`** — merges two routers. Route name collisions throw at runtime.
+
+### Parametrized route names
+
+Route names can include `[paramName]` segments. Params are extracted automatically and passed to handlers and emit calls with full type safety:
+
+```ts
+const router = new Waycast()
+  .rpc("rooms:[roomId]:messages:[msgId]", { ... })
+  .data("feeds:[userId]", z.string());
+
+// server
+server.on("rooms:[roomId]:messages:[msgId]", ({ params }) => {
+  params.roomId; // string
+  params.msgId;  // string
 });
 
-io.on("connection", (socket) => {
-  socket.on("rpc", (message) => {
-    server.handle(socket.id, message, async (meta) => {
-      // meta is typed as your Meta interface: { requireAuth?: boolean }
-      // Use it to authenticate, then return the Context object for your handler
-      return { userId: "user-123" };
-    });
-  });
-});
+// server emit
+server.emit("feeds:[userId]", { params: { userId: "42" }, data: "hello" });
+
+// client subscribe
+client.onData("feeds:[userId]", { params: { userId: "42" }, callback: (d) => {} });
 ```
 
-**Emitting Pub/Sub data from the server:**
+## Server
 
-```typescript
-// Type-safe: name, params, and data are all inferred from the schema
-server.emit("system:alerts", {
-  data: "System is going down for maintenance!",
-});
+```ts
+type Context = { userId: string; role: string };
 
-// For topics with no parameters and no data (e.g. "system:ping"), omit the options entirely
-server.emit("system:ping");
-```
-
----
-
-### 3. Setup the Client
-
-**Step 1 — Build the Waycast client adapter:**
-
-```typescript
-import { io } from "socket.io-client";
-import { appRouter } from "./router";
-
-const socket = io("http://localhost:3000");
-
-const client = appRouter.buildClient({
-  send: (message) => {
-    socket.emit("rpc", message);
-  },
-  // Optional: Logger adapter (e.g. console, pino, etc.)
-  logger: console,
-});
-```
-
-**Step 2 — Hook up incoming message handlers:**
-
-```typescript
-socket.on("data",  (msg) => client.handleData(msg));
-socket.on("reply", (msg) => client.handleReply(msg));
-
-socket.on("disconnect", () => client.handleDisconnect());
-socket.io.on("reconnect", () => client.resubscribe());
-```
-
-**Step 3 — Call RPCs & subscribe to data streams:**
-
-```typescript
-socket.on("connect", () => {
-  // Subscribe to a Pub/Sub topic. Automatically sends a subscribe message
-  // and returns an unsubscribe function for cleanup.
-  const unsubscribe = client.onData("system:alerts", {
-    callback: (msg) => {
-      console.log(`Alert: ${msg}`); // `msg` is typed as `string`
-    },
-  });
-
-  // Call an RPC with full type safety
-  const cancel = client.rpc("job:[jobId]:process", {
-    params: { jobId: "backup-42" },       // params, typed as { jobId: string }
-    payload: { force: true },             // payload, typed as { force: boolean }
-    callbacks: {
-      log:      (msg) => console.log(msg),               // typed as string
-      progress: (p)   => console.log(`${p.percent}%`),  // typed as { percent: number }
-      response: (res) => console.log(`Done: ${res}`),   // typed as boolean
-      error:    (err) => console.error(err),
-    },
-  });
-
-  // `cancel()` cancels the local listener; `unsubscribe()` unsubscribes the data topic
+const server = router.buildServer<Context>({
+	transport, // required — WaycastServerTransport<Context>
+	codec, // optional — default: JSON
+	adapter, // optional — default: in-memory
+	disposalScheduler, // optional — default: in-memory
+	logger: console, // optional
+	middlewares: [authMiddleware, loggingMiddleware], // optional
+	errorFormatter: (err) => (err instanceof Error ? err.message : String(err)), // optional
+	onHandshakeMismatch: (connectionId) => transport.disconnect(connectionId) // optional
 });
 ```
 
----
+### Handling RPC calls
 
-## Router Composition & Merging
+```ts
+server.on(
+	"users:get:[id]",
+	async ({ params, payload, context, connectionId, requestId, reply }) => {
+		reply("progress", "Loading..."); // custom intermediate reply from the `replies` config
 
-Waycast cleanly separates your **schemas** (`Router`) from your **implementation** (`ServerApp`). This allows you to split large applications into domain-driven modules while preserving 100% type inference.
+		const user = await db.getUser(params.id);
 
-**Splitting schemas with `.merge()`:**
+		return { name: user.name }; // sends "response" automatically
+		// throwing here sends "error" automatically
+	}
+);
 
-```typescript
-// users.router.ts
-export const userRouter = new Router<Meta>()
-  .data("user:[userId]:status", t.String())
-  .rpc("user:create", { /* ... */ });
-
-// posts.router.ts
-export const postRouter = new Router<Meta>()
-  .rpc("post:like", { /* ... */ });
-
-// app.router.ts
-export const appRouter = new Router<Meta>()
-  .merge(userRouter)
-  .merge(postRouter);
-
-export type AppRouter = typeof appRouter;
+// Called when the client disconnects without cancelling, after maxDisconnectionDuration
+server.onDispose("users:get:[id]", (connectionId, requestId) => {
+	cancelExpensiveJob(requestId);
+});
 ```
 
-**Splitting handler implementations into controller modules:**
+In a handler, `reply` only covers custom keys defined in the route's `replies` config. The `"response"` and `"error"` built-ins are handled implicitly — use `return` to send the response, `throw` to send an error.
 
-```typescript
-// app.router.ts
-export type AppServer = ReturnType<typeof appRouter.buildServer<Context>>;
+### Emitting data
 
-// controllers/user.controller.ts
-import type { AppServer } from "../app.router";
+```ts
+server.emit("chat:[roomId]", {
+	params: { roomId: "general" },
+	data: "new message"
+});
+```
 
-export function registerUserHandlers(server: AppServer) {
-  // Autocomplete knows about "user:create" and its fully-typed payload!
-  server.on("user:create", async (ctx) => {
-    console.log("Creating user:", ctx.payload);
-  });
+### Sending replies from outside a handler
+
+```ts
+const reply = server.reply("users:get:[id]", requestId);
+reply("progress", "Still loading..."); // custom reply
+reply("response", { name: user.name }); // built-in: sends the final response
+reply("error", "Something went wrong"); // built-in: sends an error
+```
+
+Unlike the handler's `reply`, `server.reply()` includes the `"response"` and `"error"` built-ins explicitly, since there's no `return`/`throw` to fall back on.
+
+### Middlewares
+
+Middlewares run before every RPC handler and data subscription. Use them for auth, logging, or attaching extra context:
+
+```ts
+const authMiddleware: Middleware<Context, Meta> = async ({
+	meta,
+	context,
+	next
+}) => {
+	if (meta?.roles && !meta.roles.includes(context.role)) {
+		throw new Error("Forbidden");
+	}
+	return next();
+};
+
+// Attach extra fields to context for downstream middlewares and handlers
+const tenantMiddleware: Middleware<Context, Meta> = async ({
+	context,
+	next
+}) => {
+	const tenant = await db.getTenant(context.userId);
+	return next({ context: { tenant } }); // merged shallowly into context
+};
+```
+
+- Must call `next()` exactly once — not calling it short-circuits the request (auto-error for RPC, subscribe-rejected for data)
+- `next({ context })` shallow-merges new fields into `context` for the rest of the chain; it does not affect the base connection context
+
+## Client
+
+```ts
+const client = router.buildClient({
+	transport, // required — WaycastClientTransport
+	codec, // optional — default: JSON
+	logger: console // optional
+});
+```
+
+### RPC call
+
+```ts
+const cancel = client.rpc("users:get:[id]", {
+	params: { id: "42" },
+	payload: { includeProfile: true },
+	callbacks: {
+		progress: (msg) => console.log(msg),
+		response: (user) => console.log(user.name),
+		error: (err) => console.error(err)
+	}
+});
+
+// Cancel the request and unsubscribe from the reply topic
+cancel();
+```
+
+### Subscribing to data
+
+```ts
+const unsub = client.onData("chat:[roomId]", {
+	params: { roomId: "general" },
+	callback: (msg) => console.log(msg)
+});
+
+// Unsubscribe
+unsub();
+```
+
+Multiple `onData` calls for the same resolved topic share a single subscription. The server unsubscribe is sent only when the last listener unsubscribes.
+
+The client automatically resubscribes to all active data topics and pending RPC reply topics after a reconnect (within `maxDisconnectionDuration`).
+
+## Transport
+
+The transport is the bridge between Waycast and the actual network layer. Waycast ships no built-in transports — you wire one up yourself. It's a small interface:
+
+```ts
+interface WaycastServerTransport<Context> {
+	start(handlers: {
+		onConnection: (connectionId: string, context: Context) => void;
+		onMessage: (connectionId: string, raw: string) => void;
+		onDisconnection: (connectionId: string) => void;
+	}): void | Promise<void>;
+	send(connectionId: string, raw: string): void;
+	disconnect(connectionId: string): void;
+	stop(): void | Promise<void>;
 }
 
+interface WaycastClientTransport {
+	connect(handlers: {
+		onOpen: () => void;
+		onMessage: (raw: string) => void;
+		onClose: () => void;
+	}): void | Promise<void>;
+	send(raw: string): void;
+	disconnect(): void;
+}
+```
+
+`Context` is resolved by the server transport before `onConnection` fires — a connection whose context resolution throws is closed immediately and never reaches Waycast.
+
+## Scaling
+
+By default, Waycast uses in-memory implementations for the adapter and disposal scheduler. Both are correct for a single-process deployment. For horizontal scaling, swap them out independently.
+
+### Adapter
+
+The adapter backs Waycast's pub/sub system. The default is in-memory; for multi-instance deployments, use a Redis-backed implementation:
+
+```ts
+interface WaycastAdapter {
+	subscribe(connectionId: string, topic: string): void | Promise<void>;
+	unsubscribe(connectionId: string, topic: string): void | Promise<void>;
+	publish(topic: string, raw: string): void | Promise<void>;
+	onMessage(handler: (topic: string, raw: string) => void): void;
+}
+```
+
+`onMessage` is how Waycast delivers inbound messages to locally-connected sockets. An adapter that does its own full delivery (like the Socket.io adapter below) should make this a no-op to avoid double-delivery.
+
+### Disposal Scheduler
+
+The disposal scheduler ensures `onDispose` fires exactly once cluster-wide after a client disconnects and doesn't reconnect within `maxDisconnectionDuration`. The default is in-memory; use a queue-backed implementation for multi-instance:
+
+```ts
+interface WaycastDisposalScheduler {
+	schedule(key: string, delayMs: number): void | Promise<void>;
+	cancel(key: string): void | Promise<void>;
+	onDue(handler: (key: string) => void): void;
+}
+```
+
+Example with BullMQ:
+
+```ts
+import { Queue, Worker } from "bullmq";
+
+function createBullMQDisposalScheduler(
+	connection,
+	queueName = "waycast-disposal"
+) {
+	const queue = new Queue(queueName, { connection });
+	return {
+		async schedule(key, delayMs) {
+			await (await queue.getJob(key))?.remove();
+			await queue.add(
+				key,
+				{},
+				{ jobId: key, delay: delayMs, removeOnComplete: true }
+			);
+		},
+		async cancel(key) {
+			await (await queue.getJob(key))?.remove();
+		},
+		onDue(handler) {
+			new Worker(queueName, async (job) => handler(job.id), { connection });
+		}
+	};
+}
+```
+
+## Examples
+
+### WebSocket
+
+```ts
+// transport.ts
+import { WebSocketServer } from "ws";
+import type { WaycastServerTransport, WaycastClientTransport } from "waycast";
+
+function createWebSocketServerTransport<Context>(
+	port: number,
+	createContext: (req: IncomingMessage) => Context | Promise<Context>
+): WaycastServerTransport<Context> {
+	const wss = new WebSocketServer({ port });
+	const connections = new Map<string, WebSocket>();
+
+	return {
+		start({ onConnection, onMessage, onDisconnection }) {
+			wss.on("connection", async (ws, req) => {
+				const connectionId = crypto.randomUUID();
+				connections.set(connectionId, ws);
+				let context: Context;
+				try {
+					context = await createContext(req);
+				} catch {
+					connections.delete(connectionId);
+					ws.close();
+					return;
+				}
+				onConnection(connectionId, context);
+				ws.on("message", (raw) => onMessage(connectionId, raw.toString()));
+				ws.on("close", () => {
+					connections.delete(connectionId);
+					onDisconnection(connectionId);
+				});
+			});
+		},
+		send(connectionId, raw) {
+			connections.get(connectionId)?.send(raw);
+		},
+		disconnect(connectionId) {
+			connections.get(connectionId)?.close();
+		},
+		stop() {
+			wss.close();
+		}
+	};
+}
+
+function createWebSocketClientTransport(url: string): WaycastClientTransport {
+	let ws: WebSocket;
+	return {
+		connect({ onOpen, onMessage, onClose }) {
+			ws = new WebSocket(url);
+			ws.onopen = () => onOpen();
+			ws.onmessage = (e) => onMessage(e.data);
+			ws.onclose = () => onClose();
+		},
+		send(raw) {
+			ws.send(raw);
+		},
+		disconnect() {
+			ws.close();
+		}
+	};
+}
+```
+
+```ts
 // server.ts
-const server = appRouter.buildServer<Context>(adapters);
-registerUserHandlers(server);
-```
-
----
-
-## Handling Client Disconnects
-
-When clients drop connection due to network instability, Waycast can gracefully debounce the disposal of their active RPCs, giving them a brief window to reconnect and resume where they left off.
-
-To enable this, configure the `maxDisconnectionDuration` on your Router:
-
-```typescript
-export const appRouter = new Router<Meta>({
-  maxDisconnectionDuration: 5000, // 5 seconds
+const server = router.buildServer<Context>({
+	transport: createWebSocketServerTransport(8080, async (req) => {
+		const user = await verifyToken(req.headers.authorization);
+		return { userId: user.id, role: user.role };
+	})
 });
 ```
 
-When a client drops, simply call `server.handleUnsubscribe(connectionId, topic)`. Waycast then checks if a `disposal: { schedule, cancel }` adapter was provided:
-- **In-Memory Tracking (Single Node)**: If no disposal adapter is provided, Waycast gracefully falls back to an internal, debounced `setTimeout`. This is perfect for single-instance deployments.
-- **Distributed Queues**: For horizontally scaled setups, implement the `disposal` adapter to push the timeout to a Redis/BullMQ delayed queue. When the delayed job runs, invoke `server.executeDispose(connectionId, topic)`.
-
-If the client reconnects within the threshold and resubscribes, the disposal is automatically cancelled!
-
----
-
-## Disconnected RPC Replies
-
-Sometimes you need to resolve an RPC from outside its handler — for example, after a background job completes, or from a webhook callback. Use `server.reply()`, `server.replyResponse()`, and `server.replyError()` for this:
-
-```typescript
-// Stash the requestId when the RPC comes in
-const pendingJobs = new Map<string, string>(); // jobId → requestId
-
-server.on("job:[jobId]:process", async (ctx) => {
-  pendingJobs.set(ctx.params.jobId, ctx.requestId);
-  // Don't return anything here — the response will come later
+```ts
+// client.ts
+const client = router.buildClient({
+	transport: createWebSocketClientTransport("ws://localhost:8080")
 });
+```
 
-// Resolve from a webhook or event listener
-function onJobComplete(jobId: string, success: boolean) {
-  const requestId = pendingJobs.get(jobId);
-  if (!requestId) return;
+### Socket.io
 
-  // Send an intermediate reply
-  server.reply("job:[jobId]:process", requestId)("progress", { percent: 100 });
+The Socket.io adapter delegates subscribe/publish directly to rooms, so Waycast's `onMessage` handler is intentionally a no-op — socket.io already did full delivery.
 
-  // Send the final response
-  server.replyResponse("job:[jobId]:process", requestId, success);
+```ts
+// adapter.ts
+import type { WaycastAdapter } from "waycast";
 
-  pendingJobs.delete(jobId);
+function createSocketIOAdapter(io: Server): WaycastAdapter {
+	return {
+		subscribe(connectionId, topic) {
+			io.sockets.sockets.get(connectionId)?.join(topic);
+		},
+		unsubscribe(connectionId, topic) {
+			io.sockets.sockets.get(connectionId)?.leave(topic);
+		},
+		publish(topic, raw) {
+			io.to(topic).emit("message", raw);
+		},
+		onMessage() {} // no-op — socket.io already delivered above
+	};
+}
+```
+
+```ts
+// transport.ts
+import type { WaycastServerTransport, WaycastClientTransport } from "waycast";
+
+function createSocketIOServerTransport<Context>(
+	io: Server,
+	createContext: (handshake: Socket["handshake"]) => Context | Promise<Context>
+): WaycastServerTransport<Context> {
+	return {
+		start({ onConnection, onMessage, onDisconnection }) {
+			io.on("connection", async (socket) => {
+				let context: Context;
+				try {
+					context = await createContext(socket.handshake);
+				} catch {
+					socket.disconnect(true);
+					return;
+				}
+				onConnection(socket.id, context);
+				socket.on("message", (raw) => onMessage(socket.id, raw));
+				socket.on("disconnect", () => onDisconnection(socket.id));
+			});
+		},
+		send(connectionId, raw) {
+			io.to(connectionId).emit("message", raw);
+		},
+		disconnect(connectionId) {
+			io.sockets.sockets.get(connectionId)?.disconnect(true);
+		},
+		stop() {
+			io.close();
+		}
+	};
 }
 
-// Or send an error
-function onJobFailed(jobId: string, message: string) {
-  const requestId = pendingJobs.get(jobId);
-  if (!requestId) return;
-  server.replyError("job:[jobId]:process", requestId, message);
-  pendingJobs.delete(jobId);
+function createSocketIOClientTransport(url: string): WaycastClientTransport {
+	let socket: ReturnType<typeof ioClient>;
+	return {
+		connect({ onOpen, onMessage, onClose }) {
+			socket = ioClient(url);
+			socket.on("connect", () => onOpen());
+			socket.on("message", (raw) => onMessage(raw));
+			socket.on("disconnect", () => onClose());
+		},
+		send(raw) {
+			socket.emit("message", raw);
+		},
+		disconnect() {
+			socket.disconnect();
+		}
+	};
 }
 ```
 
----
+```ts
+// server.ts
+const io = new Server(8080);
+// io.adapter(createAdapter(pubClient, subClient)); // optional: @socket.io/redis-adapter for horizontal scaling
 
-## Utility Types (Custom Hooks)
-
-Waycast exports powerful generic utilities designed to help you build strictly-typed framework wrappers (e.g. React/Vue hooks). By extracting types directly from your `AppRouter`, your UI layer gets the same aggressive type-safety as the core library.
-
-```typescript
-import { useState, useEffect } from "react";
-import type { Static } from "@sinclair/typebox";
-import type { InferDataRoutes, ParamsOf } from "waycast";
-import type { AppRouter } from "./app.router";
-import { client } from "./client";
-
-type DataRoutes = InferDataRoutes<AppRouter>;
-
-// A custom React Hook with full end-to-end type safety
-export function useWaycastData<T extends Extract<keyof DataRoutes, string>>(
-  topic: T,
-  params: ParamsOf<T>,
-): Static<DataRoutes[T]> | undefined {
-  const [data, setData] = useState<Static<DataRoutes[T]>>();
-
-  useEffect(() => {
-    // Automatically subscribes on mount, unsubscribes on unmount
-    return client.onData(topic, {
-      params,
-      callback: (newData) => setData(newData),
-    });
-  }, [topic, JSON.stringify(params)]); // Stringify params to stabilize the dep
-
-  return data;
-}
-
-// Usage in a component — fully typed at every step!
-const status = useWaycastData("user:[userId]:status", { userId: "123" });
-//    ^ string | undefined
+const server = router.buildServer<Context>({
+	transport: createSocketIOServerTransport(io, async (handshake) => {
+		const user = await verifyToken(handshake.auth.token);
+		return { userId: user.id, role: user.role };
+	}),
+	adapter: createSocketIOAdapter(io)
+	// pass createBullMQDisposalScheduler(...) here for multi-instance deployments
+});
 ```
 
----
-
-## API Reference
-
-### `new Router<Meta>()`
-
-The chainable schema builder. Shared between client and server.
-
-| Method | Signature | Description |
-|---|---|---|
-| `.data()` | `(name, schema?)` | Register a typed Pub/Sub data topic. Schema defaults to `Type.Void()`. |
-| `.rpc()` | `(name, { payload, replies, response, meta })` | Register a typed RPC route |
-| `.merge()` | `(otherRouter)` | Merge another router's routes into this one |
-| `.buildServer()` | `<Context>(adapters)` → `ServerApp` | Build a server adapter with the given transport hooks |
-| `.buildClient()` | `(adapters)` → `ClientApp` | Build a client adapter with the given transport hooks |
-
----
-
-### `ServerApp<Context, ...>`
-
-Returned by `router.buildServer()`.
-
-| Method | Signature | Description |
-|---|---|---|
-| `.on()` | `(name, handler)` → `this` | Register an RPC handler. Chainable. |
-| `.onDispose()` | `(name, handler)` → `this` | Register a cleanup handler called when client disconnects mid-RPC. Chainable. |
-| `.emit()` | `(name, { params?, data }?)` | Publish a typed message to a Pub/Sub topic |
-| `.handle()` | `(connectionId, message, middleware?)` | Route an incoming message. Call this from your transport listener. |
-| `.handleUnsubscribe()` | `(connId, topic)` | Trigger disposal for a dropped reply topic. Call on `leave-room` / disconnect. |
-| `.executeDispose()` | `(connId, topic)` | Executes a scheduled dispose handler from an external delayed queue. |
-| `.reply()` | `(name, requestId)` → `(type, data) => void` | Send an intermediate reply from outside the handler context |
-| `.replyResponse()` | `(name, requestId, data)` | Send the final response from outside the handler context |
-| `.replyError()` | `(name, requestId, error)` | Send an error from outside the handler context |
-
-**Handler context (`ctx`) object:**
-
-| Property | Type | Description |
-|---|---|---|
-| `ctx.connectionId` | `string` | The connection identifier for this socket/client |
-| `ctx.requestId` | `string` | The unique ID for this RPC invocation |
-| `ctx.params` | `ParamsOf<Name>` | Extracted route parameters (typed) |
-| `ctx.payload` | `Static<Payload>` | Validated request payload (typed) |
-| `ctx.context` | `Context` | The context object returned by your middleware |
-| `ctx.reply()` | `(type, data) => void` | Send an intermediate reply to the client |
-
----
-
-### `ClientApp<...>`
-
-Returned by `router.buildClient()`.
-
-| Method | Signature | Description |
-|---|---|---|
-| `.rpc()` | `(name, { params?, payload, callbacks })` → `() => void` | Call an RPC. Returns a cancel function. |
-| `.onData()` | `(name, { params?, callback })` → `() => void` | Subscribe to a data topic. Returns an unsubscribe function. Auto-manages ref counts. |
-| `.handleData()` | `(message)` | Feed an incoming data message into Waycast. Call from your transport listener. |
-| `.handleReply()` | `(message)` | Feed an incoming reply message into Waycast. Call from your transport listener. |
-| `.handleDisconnect()` | `()` | Records disconnect time. Call on transport `disconnect`. |
-| `.resubscribe()` | `()` | Re-subscribe to all active topics. Useful after a reconnect. |
-| `.clear()` | `()` | Unsubscribe all topics and clear all listeners and pending RPC callbacks. |
-
----
-
-### Exported Types
-
-| Type | Description |
-|---|---|
-| `InferDataRoutes<Router>` | Extracts the `DataRoutes` map from a `Router` type |
-| `InferRpcRoutes<Router>` | Extracts the `RpcRoutes` map from a `Router` type |
-| `ParamsOf<RouteString>` | Extracts dynamic `[param]` segments from a route string as `{ param: string }` |
-| `RequestMessage<RpcRoutes>` | The wire format for an incoming RPC message (for typing your transport server) |
-| `DataMessage<DataRoutes>` | The wire format for an outgoing Pub/Sub message (for typing your transport server) |
-| `RpcReplyMessage<RpcRoutes>` | The wire format for an RPC reply message (for typing your transport server) |
-| `ServerAdapters<...>` | The adapter interface you implement to connect Waycast to your transport. Includes `topic`, `emit`, `reply`, `isClientConnected`, optional `disposal` scheduling, `errorFormatter`, and `logger`. |
-| `ClientAdapters<...>` | The adapter interface you implement on the client side (includes `send` and optional `logger`) |
-| `BuiltInRpcRoutes` | Type for the built-in `_waycast:subscribe` / `_waycast:unsubscribe` routes |
-| `RpcContext<...>` | The type of the `ctx` object passed to your RPC handler |
-| `RpcDef<...>` | The type of a single RPC route definition |
-
----
-
-## Comparison
-
-| Feature | Waycast | tRPC | socket.io (raw) |
-|---|:---:|:---:|:---:|
-| Single-schema type inference¹ | ✅ | ✅ | ⚠️ |
-| Transport agnostic | ✅ | ⚠️² | ❌ |
-| Pub/Sub with typed topics | ✅ | ⚠️³ | ⚠️ |
-| Intermediate reply streams | ✅ | ⚠️⁴ | ❌ |
-| Runtime payload validation | ✅ | ✅ | ❌ |
-| Disconnected RPC replies | ✅ | ❌ | ❌ |
-| Dynamic route parameters | ✅ | ❌ | ❌ |
-| Framework agnostic | ✅ | ✅ | ✅ |
-
-> ¹ Socket.io has TypeScript support, but types must be declared manually on both client and server independently. Waycast and tRPC derive all types from a single shared schema automatically.
->
-> ² tRPC provides adapters for common runtimes (Node, Bun, fetch) but is fundamentally tied to HTTP/WebSocket — you cannot plug in an arbitrary transport layer.
->
-> ³ tRPC supports subscriptions over WebSocket, but not named Pub/Sub topics with dynamic parameters.
->
-> ⁴ tRPC v11 supports streaming responses, but the model is different — Waycast's intermediate replies are named, typed, and dispatched alongside a final response in a single RPC call.
-
----
-
-## Contributing
-
-Contributions, bug reports, and feature requests are welcome!
-
-**Setup:**
-
-```bash
-git clone https://github.com/Nunu27/waycast.git
-cd waycast
-bun install
+```ts
+// client.ts
+const client = router.buildClient({
+	transport: createSocketIOClientTransport("http://localhost:8080")
+});
 ```
-
-**Build:**
-
-```bash
-bun run build
-```
-
-**Run examples:**
-
-```bash
-cd examples/socket.io
-bun install
-bun run dev
-```
-
-**Code style:**
-
-This project uses [Biome](https://biomejs.dev/) for linting and formatting. A pre-commit hook is set up via Husky to run checks automatically. You can also run it manually:
-
-```bash
-bunx biome check --write .
-```
-
-Please open an issue before submitting a large PR so we can align on the design first.
-
----
 
 ## License
 
-[MIT](./LICENSE)
+MIT

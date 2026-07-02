@@ -1,37 +1,51 @@
 {
 	"name": "waycast",
-	"workspaces": [
-		"examples/*"
-	],
-	"version": "2.1.0",
+	"version": "3.0.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Nunu27/waycast"
+	},
 	"main": "dist/index.js",
 	"module": "dist/index.js",
-	"types": "dist/index.d.ts",
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.1",
+		"@standard-schema/spec": "^1.1.0",
+		"@types/bun": "latest",
+		"@types/ws": "^8.18.1",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.0.7",
+		"socket.io": "^4.8.3",
+		"socket.io-client": "^4.8.3",
+		"ws": "^8.21.0",
+		"zod": "^4.4.3"
+	},
+	"peerDependencies": {
+		"typescript": ">=5.0"
+	},
 	"exports": {
 		".": {
 			"import": "./dist/index.js",
 			"types": "./dist/index.d.ts"
 		}
 	},
+	"bugs": {
+		"url": "https://github.com/Nunu27/waycast/issues"
+	},
+	"description": "Transport-agnostic RPC and Pub/Sub library for TypeScript with end-to-end type safety",
 	"files": [
 		"dist"
 	],
-	"type": "module",
-	"devDependencies": {
-		"@biomejs/biome": "2.4.16",
-		"@types/bun": "latest",
-		"husky": "^9.1.7",
-		"lint-staged": "^17.0.7",
-		"pino": "*"
-	},
-	"peerDependencies": {
-		"typescript": ">=5"
-	},
-	"dependencies": {
-		"@sinclair/typebox": "^0.34.49"
+	"homepage": "https://github.com/Nunu27/waycast#readme",
+	"license": "MIT",
+	"lint-staged": {
+		"*.{js,jsx,ts,tsx,json,jsonc}": "biome check --write --no-errors-on-unmatched"
 	},
 	"scripts": {
 		"prepare": "husky",
-		"build": "bun build ./src/index.ts --outfile ./dist/index.js --target node && tsc -p tsconfig.build.json"
-	}
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"build": "bun build src/index.ts --outdir dist --target=node --format=esm && tsc -p tsconfig.build.json"
+	},
+	"type": "module",
+	"types": "dist/index.d.ts"
 }

@@ -1,274 +1,301 @@
-import type { Static, TSchema } from "@sinclair/typebox";
+import type { Codec } from "./codec.ts";
+import { jsonCodec } from "./codec.ts";
 import {
-	type BuiltInRpcRoutes,
-	buildDataTopic,
-	buildReplyTopic,
-	type Router,
-} from "./router";
+	type ClientMessage,
+	computeRouterFingerprint,
+	type ReplyEnvelope,
+	replyTopic,
+	type ServerMessage,
+} from "./protocol.ts";
+import { buildRouteName, type ParamsArg } from "./route-name.ts";
 import type {
-	ClientAdapters,
-	DataMessage,
-	ParamsOf,
-	RpcCallbacks,
-	RpcDef,
-	RpcReplyMessage,
-	SendMessage,
-	WithParams,
-} from "./types";
+	AnyRoute,
+	AnySchema,
+	DataRoute,
+	InferOutput,
+	RouteParams,
+	RpcRoute,
+	Waycast,
+} from "./router.ts";
+import type { WaycastClientTransport } from "./transport.ts";
 
-export class ClientApp<
-	DataRoutes extends Record<string, TSchema>,
-	RpcRoutes extends Record<string, RpcDef<any, any, any, any>>,
-> {
-	private dataListeners = new Map<string, Set<(data: any) => void>>();
-	private rpcCallbacks = new Map<string, RpcCallbacks<any>>();
-	private dataRouteRefCounts = new Map<string, number>();
+type RpcRouteNames<Routes> = {
+	[K in keyof Routes]: Routes[K] extends RpcRoute ? K : never;
+}[keyof Routes];
+type DataRouteNames<Routes> = {
+	[K in keyof Routes]: Routes[K] extends DataRoute ? K : never;
+}[keyof Routes];
 
-	private disconnectedAt?: number;
+export type RpcCallbacks<
+	Replies extends Record<string, AnySchema>,
+	Response extends AnySchema | undefined,
+> = {
+	[K in keyof Replies | "error" | "response"]?: K extends "error"
+		? (err: string) => void
+		: K extends "response"
+			? (value: InferOutput<Response>) => void
+			: K extends keyof Replies
+				? (value: InferOutput<Replies[K & keyof Replies]>) => void
+				: never;
+};
 
-	constructor(
-		private router: Router<any, DataRoutes, RpcRoutes>,
-		private adapters: ClientAdapters<RpcRoutes & BuiltInRpcRoutes>,
-	) {}
+export interface RpcCallArgs<Route extends RpcRoute> {
+	params: RouteParams<Route["name"] & string>;
+	payload: InferOutput<Route["payload"]>;
+	callbacks: RpcCallbacks<Route["replies"], Route["response"]>;
+}
 
-	rpc<Name extends Extract<keyof RpcRoutes, string>>(
+export interface OnDataArgs<Route extends DataRoute> {
+	params: RouteParams<Route["name"] & string>;
+	callback: (data: InferOutput<Route["schema"]>) => void;
+}
+
+export interface BuildClientOptions {
+	transport: WaycastClientTransport;
+	codec?: Codec;
+	logger?: Pick<Console, "log" | "warn" | "error">;
+}
+
+export interface WaycastClient<Routes extends Record<string, AnyRoute>> {
+	rpc<Name extends RpcRouteNames<Routes>>(
 		name: Name,
-		options: WithParams<
-			ParamsOf<Name>,
-			{
-				payload: Static<RpcRoutes[Name]["payload"]>;
-				callbacks: RpcCallbacks<RpcRoutes[Name]>;
-			}
-		>,
-	): () => void {
-		const { params, payload, callbacks } = options;
-		const requestId = crypto.randomUUID();
-		const assignedReplyTopic = buildReplyTopic(name, requestId);
-
-		this.rpcCallbacks.set(assignedReplyTopic, callbacks);
-
-		this.adapters.logger?.debug?.(
-			{ requestId, name, params, payload, assignedReplyTopic },
-			"Initiating RPC request",
-		);
-
-		const res = this.adapters.send({
-			requestId,
-			name,
-			params,
-			payload,
-		} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
-		Promise.resolve(res).catch((err) => {
-			this.adapters.logger?.error?.({ err }, "Failed to send RPC message");
-		});
-
-		return () => {
-			this.adapters.logger?.debug?.(
-				{ requestId, name, assignedReplyTopic },
-				"Cleaning up RPC request callbacks",
-			);
-			this.rpcCallbacks.delete(assignedReplyTopic);
-			this.unsubscribe([assignedReplyTopic]);
-		};
-	}
-
-	private pendingSubscribes = new Set<string>();
-	private pendingUnsubscribes = new Set<string>();
-	private flushScheduled = false;
-
-	private scheduleFlush() {
-		if (this.flushScheduled) return;
-		this.flushScheduled = true;
-		Promise.resolve().then(() => {
-			this.flushScheduled = false;
-
-			if (this.pendingSubscribes.size > 0) {
-				const topics = Array.from(this.pendingSubscribes);
-				this.pendingSubscribes.clear();
-				this.adapters.logger?.debug?.({ topics }, "Sending subscribe request");
-				this.adapters.send({
-					requestId: crypto.randomUUID(),
-					name: "_waycast:subscribe",
-					params: undefined,
-					payload: { topics },
-				} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
-			}
-
-			if (this.pendingUnsubscribes.size > 0) {
-				const topics = Array.from(this.pendingUnsubscribes);
-				this.pendingUnsubscribes.clear();
-				this.adapters.logger?.debug?.(
-					{ topics },
-					"Sending unsubscribe request",
-				);
-				this.adapters.send({
-					requestId: crypto.randomUUID(),
-					name: "_waycast:unsubscribe",
-					params: undefined,
-					payload: { topics },
-				} as unknown as SendMessage<RpcRoutes & BuiltInRpcRoutes>);
-			}
-		});
-	}
-
-	subscribe(topics: string[]) {
-		for (const topic of topics) {
-			this.pendingUnsubscribes.delete(topic);
-			this.pendingSubscribes.add(topic);
-		}
-		this.scheduleFlush();
-	}
-
-	unsubscribe(topics: string[]) {
-		for (const topic of topics) {
-			this.pendingSubscribes.delete(topic);
-			this.pendingUnsubscribes.add(topic);
-		}
-		this.scheduleFlush();
-	}
-
-	handleDisconnect() {
-		this.disconnectedAt = Date.now();
-	}
-
-	resubscribe() {
-		let disconnectedDuration = 0;
-		if (this.disconnectedAt) {
-			disconnectedDuration = Date.now() - this.disconnectedAt;
-			this.disconnectedAt = undefined;
-		}
-
-		const activeTopics = [...this.dataListeners.keys()];
-
-		const maxDuration = this.router.options.maxDisconnectionDuration;
-		if (maxDuration === undefined || disconnectedDuration <= maxDuration) {
-			activeTopics.push(...this.rpcCallbacks.keys());
-		} else {
-			for (const [topic, callbacks] of this.rpcCallbacks.entries()) {
-				callbacks.error?.("Connection lost for too long");
-				this.rpcCallbacks.delete(topic);
-			}
-		}
-
-		if (activeTopics.length > 0) {
-			this.adapters.logger?.debug?.(
-				{ activeTopics },
-				"Triggering resubscription for active topics",
-			);
-			this.subscribe(activeTopics);
-		}
-	}
-
-	clear() {
-		const activeTopics = [
-			...this.dataListeners.keys(),
-			...this.rpcCallbacks.keys(),
-		];
-		this.adapters.logger?.debug?.(
-			{ activeTopics, rpcCallbacksCount: this.rpcCallbacks.size },
-			"Clearing all client active topics, listeners, and RPC callbacks",
-		);
-		if (activeTopics.length > 0) {
-			this.unsubscribe(activeTopics);
-		}
-		this.dataListeners.clear();
-		this.dataRouteRefCounts.clear();
-		this.rpcCallbacks.clear();
-	}
-
-	onData<Name extends Extract<keyof DataRoutes, string>>(
+		args: ParamsArg<Name & string> & {
+			payload: InferOutput<Extract<Routes[Name], RpcRoute>["payload"]>;
+			callbacks: RpcCallbacks<
+				Extract<Routes[Name], RpcRoute>["replies"],
+				Extract<Routes[Name], RpcRoute>["response"]
+			>;
+		},
+	): () => void;
+	onData<Name extends DataRouteNames<Routes>>(
 		name: Name,
-		options: WithParams<
-			ParamsOf<Name>,
-			{
-				callback: (data: Static<DataRoutes[Name]>) => void;
+		args: ParamsArg<Name & string> & {
+			callback: (
+				data: InferOutput<Extract<Routes[Name], DataRoute>["schema"]>,
+			) => void;
+		},
+	): () => void;
+	disconnect(): void;
+}
+
+const DEBOUNCE_MS = 50;
+
+interface PendingRpc {
+	name: string;
+	topic: string;
+	callbacks: RpcCallbacks<Record<string, AnySchema>, AnySchema | undefined>;
+	expireTimer?: ReturnType<typeof setTimeout>;
+}
+
+export function buildClient<Routes extends Record<string, AnyRoute>>(
+	router: Waycast<unknown, Routes>,
+	options: BuildClientOptions,
+): WaycastClient<Routes> {
+	const transport = options.transport;
+	const codec = options.codec ?? jsonCodec;
+	const logger = options.logger;
+	const fingerprint = computeRouterFingerprint(router._routes);
+	const maxDisconnectionDuration = router.options.maxDisconnectionDuration;
+
+	let handshakeOk = false;
+	let hasConnectedOnce = false;
+
+	const pendingRpc = new Map<string, PendingRpc>();
+	const dataSubscriptions = new Map<string, Set<(data: unknown) => void>>();
+
+	const pendingSubscribe = new Set<string>();
+	const pendingUnsubscribe = new Set<string>();
+	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// most transports (e.g. ws WebSocket) silently swallow send() calls made before the
+	// connection opens — queue here and flush on handshake-ok instead of dropping
+	const outbox: ClientMessage[] = [];
+
+	function send(message: ClientMessage) {
+		transport.send(codec.encode(message));
+	}
+
+	function sendWhenReady(message: ClientMessage) {
+		if (handshakeOk) send(message);
+		else outbox.push(message);
+	}
+
+	function scheduleFlush() {
+		if (flushTimer || !handshakeOk) return;
+		flushTimer = setTimeout(() => {
+			flushTimer = undefined;
+			if (pendingSubscribe.size > 0) {
+				send({ type: "subscribe", topics: [...pendingSubscribe] });
+				pendingSubscribe.clear();
 			}
-		>,
-	): () => void {
-		const { params, callback } = options;
-		const topic = buildDataTopic(name, params);
-		if (!this.dataListeners.has(topic)) {
-			this.dataListeners.set(topic, new Set());
-		}
-		this.dataListeners.get(topic)?.add(callback);
+			if (pendingUnsubscribe.size > 0) {
+				send({ type: "unsubscribe", topics: [...pendingUnsubscribe] });
+				pendingUnsubscribe.clear();
+			}
+		}, DEBOUNCE_MS);
+	}
 
-		const refCount = this.dataRouteRefCounts.get(topic) || 0;
-		this.adapters.logger?.debug?.(
-			{ name, params, topic, refCount: refCount + 1 },
-			"Subscribing to data topic listener",
-		);
-		if (refCount === 0) {
-			this.subscribe([topic]);
-		}
-		this.dataRouteRefCounts.set(topic, refCount + 1);
+	function queueSubscribe(topic: string) {
+		pendingUnsubscribe.delete(topic);
+		pendingSubscribe.add(topic);
+		scheduleFlush();
+	}
 
-		return () => {
-			const listeners = this.dataListeners.get(topic);
-			if (listeners) {
-				listeners.delete(callback);
-				if (listeners.size === 0) {
-					this.dataListeners.delete(topic);
+	function queueUnsubscribe(topic: string) {
+		pendingSubscribe.delete(topic);
+		pendingUnsubscribe.add(topic);
+		scheduleFlush();
+	}
+
+	function resolvePendingRpc(topic: string, key: string, value: unknown) {
+		const pending = pendingRpc.get(topic);
+		if (!pending) return;
+
+		const callback = (
+			pending.callbacks as Record<
+				string,
+				((value: unknown) => void) | undefined
+			>
+		)[key];
+		callback?.(value);
+
+		if (key === "error") {
+			if (pending.expireTimer) clearTimeout(pending.expireTimer);
+			pendingRpc.delete(topic);
+		} else if (key === "response") {
+			if (pending.expireTimer) clearTimeout(pending.expireTimer);
+			pendingRpc.delete(topic);
+			queueUnsubscribe(topic);
+		}
+	}
+
+	transport.connect({
+		onOpen() {
+			handshakeOk = false;
+			send({ type: "handshake", fingerprint });
+		},
+		onMessage(raw) {
+			let message: ServerMessage;
+			try {
+				message = codec.decode(raw) as ServerMessage;
+			} catch (err) {
+				logger?.error?.(err);
+				return;
+			}
+
+			switch (message.type) {
+				case "handshake": {
+					if (!message.ok) {
+						logger?.error?.(
+							new Error(
+								"Waycast handshake mismatch: client and server routers are incompatible",
+							),
+						);
+						return;
+					}
+					handshakeOk = true;
+					for (const queued of outbox.splice(0)) send(queued);
+
+					// on initial connect, pending rpc topics are created server-side as part
+					// of handling the "rpc" message — resubscribing here would race ahead of
+					// that and get rejected. Only resubscribe on reconnect.
+					if (hasConnectedOnce) {
+						for (const topic of pendingRpc.keys()) queueSubscribe(topic);
+					}
+					hasConnectedOnce = true;
+
+					for (const topic of dataSubscriptions.keys()) queueSubscribe(topic);
+					scheduleFlush();
+					return;
+				}
+				case "publish": {
+					if (pendingRpc.has(message.topic)) {
+						const envelope = message.payload as ReplyEnvelope;
+						resolvePendingRpc(message.topic, envelope.key, envelope.value);
+						return;
+					}
+					const callbacks = dataSubscriptions.get(message.topic);
+					if (callbacks)
+						for (const callback of callbacks) callback(message.payload);
+					return;
+				}
+				case "subscribe-rejected": {
+					logger?.warn?.(
+						`Waycast subscribe rejected for "${message.topic}": ${message.reason}`,
+					);
+					if (pendingRpc.has(message.topic))
+						resolvePendingRpc(message.topic, "error", message.reason);
+					return;
 				}
 			}
-
-			const newCount = (this.dataRouteRefCounts.get(topic) || 1) - 1;
-			this.adapters.logger?.debug?.(
-				{ name, params, topic, newCount },
-				"Unsubscribing from data topic listener",
-			);
-			if (newCount <= 0) {
-				this.unsubscribe([topic]);
-				this.dataRouteRefCounts.delete(topic);
-			} else {
-				this.dataRouteRefCounts.set(topic, newCount);
+		},
+		onClose() {
+			handshakeOk = false;
+			for (const pending of pendingRpc.values()) {
+				pending.expireTimer = setTimeout(() => {
+					resolvePendingRpc(
+						pending.topic,
+						"error",
+						`Waycast: connection lost and did not reconnect within ${maxDisconnectionDuration}ms`,
+					);
+				}, maxDisconnectionDuration);
 			}
-		};
-	}
+		},
+	});
 
-	handleData(message: DataMessage<DataRoutes>) {
-		const topic = message.topic;
-		this.adapters.logger?.debug?.(
-			{ topic, name: message.name, data: message.data },
-			"Received data message",
-		);
-		const listeners = this.dataListeners.get(topic);
-		if (listeners) {
-			for (const cb of listeners) {
-				cb(message.data);
-			}
-		} else {
-			this.adapters.logger?.debug?.(
-				{ topic, name: message.name },
-				"No listeners registered for data topic",
-			);
-		}
-	}
-
-	handleReply(message: RpcReplyMessage<RpcRoutes & BuiltInRpcRoutes>) {
-		const { name, requestId, reply } = message;
-		const replyTopic = buildReplyTopic(name, requestId);
-		this.adapters.logger?.debug?.(
-			{
-				name,
+	return {
+		rpc(name, args) {
+			const requestId = crypto.randomUUID();
+			const topic = replyTopic(name as string, requestId);
+			pendingRpc.set(topic, {
+				name: name as string,
+				topic,
+				callbacks: args.callbacks as RpcCallbacks<
+					Record<string, AnySchema>,
+					AnySchema | undefined
+				>,
+			});
+			sendWhenReady({
+				type: "rpc",
+				name: name as string,
 				requestId,
-				replyTopic,
-				replyType: reply.type,
-				replyData: reply.data,
-			},
-			"Received RPC reply",
-		);
-		const callbacks = this.rpcCallbacks.get(replyTopic);
-		if (callbacks) {
-			callbacks[reply.type]?.(reply.data);
+				params: (args.params ?? {}) as Record<string, string>,
+				payload: args.payload,
+			});
 
-			if (reply.type === "error") {
-				this.rpcCallbacks.delete(replyTopic);
-			}
-		} else {
-			this.adapters.logger?.debug?.(
-				{ name, requestId, replyTopic },
-				"No callback found for reply topic",
+			return () => {
+				const pending = pendingRpc.get(topic);
+				if (!pending) return;
+				if (pending.expireTimer) clearTimeout(pending.expireTimer);
+				pendingRpc.delete(topic);
+				queueUnsubscribe(topic);
+			};
+		},
+		onData(name, args) {
+			const topic = buildRouteName(
+				name as string,
+				(args.params ?? {}) as Record<string, string>,
 			);
-		}
-	}
+			let callbacks = dataSubscriptions.get(topic);
+			if (!callbacks) {
+				callbacks = new Set();
+				dataSubscriptions.set(topic, callbacks);
+				queueSubscribe(topic);
+			}
+			callbacks.add(args.callback as (data: unknown) => void);
+
+			return () => {
+				const set = dataSubscriptions.get(topic);
+				if (!set) return;
+				set.delete(args.callback as (data: unknown) => void);
+				if (set.size === 0) {
+					dataSubscriptions.delete(topic);
+					queueUnsubscribe(topic);
+				}
+			};
+		},
+		disconnect() {
+			transport.disconnect();
+		},
+	};
 }
