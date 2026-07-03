@@ -49,7 +49,6 @@ server.emit("messages:[roomId]", {
 const client = router.buildClient({ transport: myClientTransport });
 
 const cancel = client.rpc("greet", {
-	params: {},
 	payload: { name: "world" },
 	callbacks: {
 		response: (msg) => console.log(msg), // "Hello, world!"
@@ -147,7 +146,15 @@ const server = router.buildServer<Context>({
 ```ts
 server.on(
 	"users:get:[id]",
-	async ({ params, payload, context, connectionId, requestId, reply, signal }) => {
+	async ({
+		params,
+		payload,
+		context,
+		connectionId,
+		requestId,
+		reply,
+		signal
+	}) => {
 		reply("progress", "Loading..."); // custom intermediate reply from the `replies` config
 
 		const user = await db.getUser(params.id, { signal }); // pass through to cancel the underlying work
@@ -157,8 +164,10 @@ server.on(
 	}
 );
 
-// Called whenever the request's lifecycle ends — success, explicit cancel, disconnect
-// timeout, or the client resubscribing on a different instance (see Scaling below)
+// Called whenever the request's lifecycle ends — explicit cancel, disconnect timeout, or
+// the client resubscribing on a different instance (see Scaling below). A successful
+// response does NOT end the lifecycle by itself — the reply topic stays subscribed
+// until the client calls cancel(), so late replies can still be sent after "response".
 server.onDispose("users:get:[id]", (connectionId, requestId) => {
 	cancelExpensiveJob(requestId);
 });
@@ -240,7 +249,10 @@ const cancel = client.rpc("users:get:[id]", {
 	}
 });
 
-// Cancel the request and unsubscribe from the reply topic
+// Always call this once you're done with the request — including after a successful
+// response — to unsubscribe from the reply topic and let the server dispose it.
+// Without it, the server-side session (and onDispose) stays alive until the client
+// disconnects and the disconnect grace period elapses.
 cancel();
 ```
 

@@ -416,6 +416,37 @@ describe("rpc disposal", () => {
 		expect(disposed).toEqual(["req-1"]);
 	});
 
+	it("does not dispose on a successful response — only on explicit cancel", async () => {
+		const router = new Waycast().rpc("session", { response: z.string() });
+		const serverTransport = createMemoryServerTransport<undefined>();
+		const server = router.buildServer({ transport: serverTransport });
+
+		const disposed: string[] = [];
+		server.onDispose("session", (_connectionId, requestId) =>
+			disposed.push(requestId),
+		);
+		server.on("session", async () => "done");
+
+		const client = router.buildClient({
+			transport: serverTransport.connectClient(undefined),
+		});
+		const cancel = await new Promise<() => void>((resolve) => {
+			const c = client.rpc("session", {
+				params: {},
+				payload: undefined,
+				callbacks: { response: () => resolve(c) },
+			});
+		});
+
+		// past the debounce window that used to auto-send "unsubscribe" on response
+		await sleep(80);
+		expect(disposed.length).toBe(0);
+
+		cancel();
+		await sleep(80);
+		expect(disposed.length).toBe(1);
+	});
+
 	it("calls the client's error callback when the connection never comes back", async () => {
 		const router = new Waycast({ maxDisconnectionDuration: 30 }).rpc("session");
 		const serverTransport = createMemoryServerTransport<undefined>();
@@ -466,7 +497,7 @@ describe("handshake", () => {
 		clientRouter.buildClient({
 			transport: clientTransport,
 			logger: {
-				log: () => {},
+				info: () => {},
 				warn: () => {},
 				error: (err) => errors.push(err),
 			},

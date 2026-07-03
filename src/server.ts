@@ -97,7 +97,7 @@ export interface BuildServerOptions<Context, Meta> {
 	codec?: Codec;
 	adapter?: WaycastAdapter;
 	disposalScheduler?: WaycastDisposalScheduler;
-	logger?: Pick<Console, "log" | "warn" | "error">;
+	logger?: Pick<Console, "info" | "warn" | "error">;
 	middlewares?: Middleware<Context, Meta>[];
 	errorFormatter?: (err: unknown) => string;
 	onHandshakeMismatch?: (connectionId: string) => void;

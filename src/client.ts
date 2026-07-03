@@ -53,7 +53,7 @@ export interface OnDataArgs<Route extends DataRoute> {
 export interface BuildClientOptions {
 	transport: WaycastClientTransport;
 	codec?: Codec;
-	logger?: Pick<Console, "log" | "warn" | "error">;
+	logger?: Pick<Console, "info" | "warn" | "error">;
 }
 
 export interface WaycastClient<Routes extends Record<string, AnyRoute>> {
@@ -85,6 +85,11 @@ interface PendingRpc {
 	topic: string;
 	callbacks: RpcCallbacks<Record<string, AnySchema>, AnySchema | undefined>;
 	expireTimer?: ReturnType<typeof setTimeout>;
+	// true once "response" has been delivered — the reply topic stays subscribed (and the
+	// server-side session stays alive) past this point, since only an explicit cancel()
+	// should end it. Kept in `pendingRpc` rather than deleted so cancel() still has
+	// something to unsubscribe, and so it still resubscribes across a reconnect.
+	settled?: boolean;
 }
 
 export function buildClient<Routes extends Record<string, AnyRoute>>(
@@ -151,6 +156,19 @@ export function buildClient<Routes extends Record<string, AnyRoute>>(
 		const pending = pendingRpc.get(topic);
 		if (!pending) return;
 
+		if (key === "error") {
+			if (pending.expireTimer) clearTimeout(pending.expireTimer);
+			pendingRpc.delete(topic);
+			// a response already settled this call — a late "error" (e.g. a resubscribe
+			// rejected after reconnect because the server-side session is gone) shouldn't
+			// override it
+			if (pending.settled) return;
+		} else if (key === "response") {
+			if (pending.settled) return;
+			if (pending.expireTimer) clearTimeout(pending.expireTimer);
+			pending.settled = true;
+		}
+
 		const callback = (
 			pending.callbacks as Record<
 				string,
@@ -158,15 +176,6 @@ export function buildClient<Routes extends Record<string, AnyRoute>>(
 			>
 		)[key];
 		callback?.(value);
-
-		if (key === "error") {
-			if (pending.expireTimer) clearTimeout(pending.expireTimer);
-			pendingRpc.delete(topic);
-		} else if (key === "response") {
-			if (pending.expireTimer) clearTimeout(pending.expireTimer);
-			pendingRpc.delete(topic);
-			queueUnsubscribe(topic);
-		}
 	}
 
 	transport.connect({
@@ -232,6 +241,10 @@ export function buildClient<Routes extends Record<string, AnyRoute>>(
 		onClose() {
 			handshakeOk = false;
 			for (const pending of pendingRpc.values()) {
+				// already got its response — the caller was notified, so a connection drop
+				// afterward isn't a failure worth reporting; the server reclaims the session
+				// on its own via the disconnect grace period if cancel() is never called
+				if (pending.settled) continue;
 				pending.expireTimer = setTimeout(() => {
 					resolvePendingRpc(
 						pending.topic,
