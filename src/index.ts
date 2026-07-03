@@ -30,9 +30,9 @@ export type {
 export { Waycast as default, Waycast } from "./router.ts";
 export type { WaycastDisposalScheduler } from "./scheduler.ts";
 export { createInMemoryDisposalScheduler } from "./scheduler.ts";
-
 export type {
 	BuildServerOptions,
+	Defer,
 	HandlerReplyFn,
 	Middleware,
 	MiddlewareNext,
@@ -42,6 +42,7 @@ export type {
 	RpcHandlerArgs,
 	WaycastServer,
 } from "./server.ts";
+export { DEFER } from "./server.ts";
 export type {
 	WaycastClientTransport,
 	WaycastServerTransport,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
 import { Waycast } from "../router.ts";
+import { DEFER } from "../server.ts";
 import {
 	createLinkedInMemoryAdapters,
 	createMemoryServerTransport,
@@ -95,6 +96,60 @@ describe("rpc happy path", () => {
 		});
 
 		expect(error).toBe("kaboom");
+	});
+
+	it("still sends a response when the handler returns nothing", async () => {
+		const router = new Waycast().rpc("ping");
+		const serverTransport = createMemoryServerTransport<undefined>();
+		const server = router.buildServer({ transport: serverTransport });
+		server.on("ping", async () => {});
+
+		const client = router.buildClient({
+			transport: serverTransport.connectClient(undefined),
+		});
+
+		const responded = await new Promise<boolean>((resolve) => {
+			client.rpc("ping", {
+				params: {},
+				payload: undefined,
+				callbacks: { response: () => resolve(true) },
+			});
+		});
+
+		expect(responded).toBe(true);
+	});
+
+	it("lets a handler DEFER the response and send it later via server.reply()", async () => {
+		const router = new Waycast().rpc("async-job", { response: z.string() });
+		const serverTransport = createMemoryServerTransport<undefined>();
+		const server = router.buildServer({ transport: serverTransport });
+
+		let deferredRequestId: string | undefined;
+		server.on("async-job", async ({ requestId }) => {
+			deferredRequestId = requestId;
+			return DEFER;
+		});
+
+		const client = router.buildClient({
+			transport: serverTransport.connectClient(undefined),
+		});
+
+		const response = new Promise<string>((resolve) => {
+			client.rpc("async-job", {
+				params: {},
+				payload: undefined,
+				callbacks: { response: resolve },
+			});
+		});
+
+		await sleep(20);
+		expect(deferredRequestId).toBeTruthy();
+		server.reply("async-job", deferredRequestId as string)(
+			"response",
+			"done later",
+		);
+
+		expect(await response).toBe("done later");
 	});
 });
 

@@ -173,7 +173,7 @@ server.onDispose("users:get:[id]", (connectionId, requestId) => {
 });
 ```
 
-In a handler, `reply` only covers custom keys defined in the route's `replies` config. The `"response"` and `"error"` built-ins are handled implicitly — use `return` to send the response, `throw` to send an error.
+In a handler, `reply` only covers custom keys defined in the route's `replies` config. The `"response"` and `"error"` built-ins are handled implicitly — use `return` to send the response, `throw` to send an error. The response is sent as soon as the handler settles, even if it returns nothing — return `DEFER` instead to opt out and send the response later from outside the handler (see below).
 
 `signal` is an `AbortSignal` scoped to the request. It's created before the handler runs, so there's no race between disposal and the handler having set anything up — check `signal.aborted` or listen for `"abort"` to bail out early from long-running work. It always aborts before `onDispose` fires for the same request, so `onDispose` can rely on the handler having already stopped.
 
@@ -189,13 +189,21 @@ server.emit("chat:[roomId]", {
 ### Sending replies from outside a handler
 
 ```ts
+import { DEFER } from "waycast";
+
+server.on("users:get:[id]", async ({ requestId }) => {
+	queueJob(requestId); // finishes later, off the handler's call stack
+	return DEFER; // skip the automatic response — sent later via server.reply()
+});
+
+// ...once the job completes, from wherever it finishes:
 const reply = server.reply("users:get:[id]", requestId);
 reply("progress", "Still loading..."); // custom reply
 reply("response", { name: user.name }); // built-in: sends the final response
 reply("error", "Something went wrong"); // built-in: sends an error
 ```
 
-Unlike the handler's `reply`, `server.reply()` includes the `"response"` and `"error"` built-ins explicitly, since there's no `return`/`throw` to fall back on.
+Unlike the handler's `reply`, `server.reply()` includes the `"response"` and `"error"` built-ins explicitly, since there's no `return`/`throw` to fall back on. `DEFER` only suppresses the *automatic* response — it has no effect once `server.reply()` sends one.
 
 ### Middlewares
 

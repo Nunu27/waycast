@@ -27,6 +27,14 @@ import type { WaycastDisposalScheduler } from "./scheduler.ts";
 import { createInMemoryDisposalScheduler } from "./scheduler.ts";
 import type { WaycastServerTransport } from "./transport.ts";
 
+// Sentinel a handler can return to skip the automatic "response" reply — used when the
+// response will be sent later from outside the handler (e.g. via server.reply()), rather
+// than synchronously as the handler's return value. A branded string literal (rather than
+// a unique symbol) survives inferred async-function return types without widening, which
+// matters since handlers are almost always written without an explicit return annotation.
+export const DEFER = "__waycast_defer__" as const;
+export type Defer = typeof DEFER;
+
 export type MiddlewareNext = <
 	Extra extends object = Record<string, never>,
 >(opts?: {
@@ -89,8 +97,9 @@ type MaybePromise<T> = Promise<T> | T;
 export type RpcHandler<Context, Route extends RpcRoute> = (
 	args: RpcHandlerArgs<Context, Route>,
 ) => undefined extends Route["response"]
-	? MaybePromise<void>
-	: MaybePromise<InferOutput<Route["response"]>>;
+	? // biome-ignore lint/suspicious/noConfusingVoidType: handlers with no response schema commonly have no return statement, which TS infers as Promise<void>
+		MaybePromise<void | Defer>
+	: MaybePromise<InferOutput<Route["response"]> | Defer>;
 
 export interface BuildServerOptions<Context, Meta> {
 	transport: WaycastServerTransport<Context>;
@@ -364,7 +373,7 @@ export function buildServer<
 						signal: controller.signal,
 					}),
 			);
-			if (result !== undefined) reply("response", result);
+			if (result !== DEFER) reply("response", result);
 		} catch (err) {
 			logger?.error?.(err);
 			await fail(errorFormatter(err));
